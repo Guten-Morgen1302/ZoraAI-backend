@@ -69,3 +69,31 @@ def set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
         samesite="lax",
         max_age=REFRESH_TOKEN_EXPIRE_DAYS*24*60*60,
     )
+
+
+def clear_auth_cookies(response) -> None:
+    response.delete_cookie(
+        key="access_token",
+        httponly=True,
+        samesite="lax",
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        httponly=True,
+        samesite="lax",
+    )
+
+
+def get_token_subject(token: str, expected_type: str | None = None) -> str | None:
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.InvalidTokenError:
+        return None
+
+    token_subject = payload.get("sub")
+    token_type = payload.get("type")
+    if not token_subject:
+        return None
+    if expected_type and token_type != expected_type:
+        return None
+    return token_subject

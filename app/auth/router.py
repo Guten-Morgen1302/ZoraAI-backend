@@ -1,11 +1,13 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.auth.security import (
+    clear_auth_cookies,
     create_access_token,
     create_refresh_token,
+    get_token_subject,
     hash_password,
     set_auth_cookies,
     verify_password,
@@ -66,3 +68,25 @@ def login(payload: UserLogin, response: Response, db: Session = Depends(get_db))
         refresh_token=refresh_token,
         token_type="bearer",
     )
+
+
+@router.post("/logout")
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    access_token = request.cookies.get("access_token")
+    refresh_token = request.cookies.get("refresh_token")
+
+    user_id = None
+    if access_token:
+        user_id = get_token_subject(access_token, expected_type="access")
+    if not user_id and refresh_token:
+        user_id = get_token_subject(refresh_token, expected_type="refresh")
+
+    if user_id:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user and user.is_active:
+            user.is_active = False
+            user.updated_at = datetime.utcnow()
+            db.commit()
+
+    clear_auth_cookies(response)
+    return {"message": "Logged out successfully"}
