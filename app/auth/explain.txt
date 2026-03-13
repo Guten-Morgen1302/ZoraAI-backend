@@ -1,0 +1,5 @@
+Simple cookie based Auth hai.. 
+
+role = Column(String, default="analyst")(analyst or developer aa sakta)
+
+organization_name = Column(String, nullable=True) (Fintech orgs etc)
