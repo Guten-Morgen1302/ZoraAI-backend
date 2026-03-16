@@ -1,4 +1,7 @@
 from pydantic import BaseModel, EmailStr
+from enum import Enum
+from uuid import UUID
+from pydantic import Field
 
 
 class UserCreate(BaseModel):
@@ -18,3 +21,21 @@ class TokenResponse(BaseModel):
 	access_token: str
 	refresh_token: str
 	token_type: str
+
+
+class MessageSource(str, Enum):
+	sms = "sms"
+	email = "email"
+	chat = "chat"
+
+
+class TextAnalyzeRequest(BaseModel):
+	text: str = Field(min_length=1, max_length=5000)
+	source: MessageSource
+
+
+class TextAnalyzeResponse(BaseModel):
+	request_id: UUID
+	links_detected: int
+	urgent_language: bool
+	status: str

@@ -1,7 +1,8 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Float, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime
+from sqlalchemy.orm import relationship
 
 from .database import Base
 
@@ -27,4 +28,40 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PhishingRequest(Base):
+
+    __tablename__ = "phishing_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    user_id = Column(UUID(as_uuid=True), nullable=True)
+
+    text = Column(String, nullable=False)
+
+    source = Column(String, nullable=False) #should be email/sms/chat
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    analysis = relationship("PhishingAnalysis", back_populates="request", uselist=False)
+
+
+class PhishingAnalysis(Base):
+
+    __tablename__ = "phishing_analysis"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    request_id = Column(UUID(as_uuid=True), ForeignKey("phishing_requests.id"), nullable=False, unique=True)
+
+    link_count = Column(Integer, nullable=False, default=0) # No. of urls detected in each req
+
+    urgency_score = Column(Float, nullable=False, default=0.0) #checks in urgency from the request..
+
+    status = Column(String, nullable=False, default="processing")
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    request = relationship("PhishingRequest", back_populates="analysis")
 
