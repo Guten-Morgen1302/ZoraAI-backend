@@ -5,13 +5,16 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger("zora.fraud_memory.qdrant")
 
 DEFAULT_QDRANT_URL = (
     "https://2b00db0a-2c04-4acc-8aa1-ed063c56dcd4.eu-west-1-0.aws.cloud.qdrant.io:6333"
 )
-DEFAULT_QDRANT_API_KEY = "INSERT_API_KEY"
+DEFAULT_QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 DEFAULT_COLLECTION_NAME = "fraud_vectors"
 DEFAULT_VECTOR_SIZE = 384
 

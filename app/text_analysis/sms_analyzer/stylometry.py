@@ -161,7 +161,7 @@ def predict_stylometry_score(text: str, model_path: str | Path | None = None) ->
 
 
 if __name__ == "__main__":
-    default_dataset = Path(__file__).resolve().parent / "final_merged_sms_dataset.csv"
+    default_dataset = Path(__file__).resolve().parent / "merged_sms_dataset.csv"
     if default_dataset.exists():
         result = train_stylometry_model(default_dataset, text_column="text", label_column="label")
         print(f"Trained stylometry model: {result}")
