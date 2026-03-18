@@ -3,11 +3,13 @@ from __future__ import annotations
 import logging
 import re
 import string
-import unicodedata
 from urllib.parse import urlparse
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
+
+from app.text_analysis.preprocessing import preprocess_text
+from app.text_analysis.url_analyzer import analyze_urls
 
 try:
     import tldextract
@@ -90,9 +92,7 @@ def clean_text(raw_text: str) -> str:
     if not isinstance(raw_text, str):
         raise TypeError("raw_text must be a string")
 
-    normalized = unicodedata.normalize("NFKC", raw_text)
-    without_extra_whitespace = WHITESPACE_PATTERN.sub(" ", normalized).strip()
-    return without_extra_whitespace.lower()
+    return preprocess_text(raw_text)["clean_text"]
 
 
 def extract_urls(text: str) -> dict[str, Any]:
@@ -179,17 +179,25 @@ def extract_entities(cleaned_text: str) -> dict[str, list[str]]:
 
 
 def process_text(raw_message: str) -> dict[str, Any]:
-    cleaned_text = clean_text(raw_message)
+    preprocessing_output = preprocess_text(raw_message)
+    cleaned_text = preprocessing_output["clean_text"]
+    urls = preprocessing_output["urls"]
     url_features = extract_urls(cleaned_text)
+    url_risk = analyze_urls(urls)
     urgency_score = detect_urgency(cleaned_text)
     stylometry_features = extract_stylometry(raw_text=raw_message, cleaned_text=cleaned_text)
     entities = extract_entities(cleaned_text)
 
     return {
+        "clean_text": cleaned_text,
         "cleaned_text": cleaned_text,
-        "urls": url_features["urls"],
+        "urls": urls,
+        "phones": preprocessing_output["phones"],
+        "emails": preprocessing_output["emails"],
         "domain": url_features["domain"],
         "url_count": url_features["url_count"],
+        "url_risk_score": url_risk["url_risk_score"],
+        "url_risk_flags": url_risk["flags"],
         "urgency_score": urgency_score,
         "stylometry_features": stylometry_features,
         "entities": entities,

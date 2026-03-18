@@ -90,11 +90,15 @@ class QdrantVectorStore:
         results: list[dict[str, str | float | None]] = []
         for point in points:
             payload = point.payload or {}
+            matched_label = payload.get("fraud_label") or payload.get("label")
             results.append(
                 {
                     "text": payload.get("text"),
                     "similarity": round(float(point.score), 4),
-                    "fraud_label": payload.get("fraud_label"),
+                    "fraud_label": matched_label,
+                    "label": matched_label,
+                    "source": payload.get("source"),
+                    "source_file": payload.get("source_file"),
                     "timestamp": payload.get("timestamp"),
                 }
             )

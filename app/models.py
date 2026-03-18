@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Float, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Float, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime
 from sqlalchemy.orm import relationship
@@ -45,6 +45,7 @@ class PhishingRequest(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     analysis = relationship("PhishingAnalysis", back_populates="request", uselist=False)
+    sms_threat_result = relationship("SmsThreatResult", back_populates="request", uselist=False)
 
 
 class PhishingAnalysis(Base):
@@ -64,4 +65,23 @@ class PhishingAnalysis(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     request = relationship("PhishingRequest", back_populates="analysis")
+
+
+class SmsThreatResult(Base):
+
+    __tablename__ = "sms_threat_results"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    request_id = Column(UUID(as_uuid=True), ForeignKey("phishing_requests.id"), nullable=False, unique=True)
+
+    result = Column(Text, nullable=False)
+
+    prediction = Column(Text, nullable=False)
+
+    explanation = Column(Text, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    request = relationship("PhishingRequest", back_populates="sms_threat_result")
 

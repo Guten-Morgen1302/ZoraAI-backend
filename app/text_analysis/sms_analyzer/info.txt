@@ -177,10 +177,10 @@ threat_scoring.py
 Final Score Formula:
 final_score =
 0.4 * nlp_score +
-0.2 * similarity_score +
-0.2 * url_score +
-0.1 * stylometry_score +
-0.1 * rule_score
+0.3 * similarity_score +
+0.3 * stylometry_score 
+
+
 Final Output:
 {
   "risk_score": 0.92,

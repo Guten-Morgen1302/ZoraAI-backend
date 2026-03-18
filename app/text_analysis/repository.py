@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from app.models import PhishingAnalysis, PhishingRequest
+from app.models import PhishingAnalysis, PhishingRequest, SmsThreatResult
 
 
 class PhishingRepository:
@@ -33,3 +33,20 @@ class PhishingRepository:
         self.db.add(analysis)
         self.db.flush()
         return analysis
+
+    def create_sms_threat_result(
+        self,
+        request_id,
+        result: str,
+        prediction: str,
+        explanation: str,
+    ) -> SmsThreatResult:
+        sms_result = SmsThreatResult(
+            request_id=request_id,
+            result=result,
+            prediction=prediction,
+            explanation=explanation,
+        )
+        self.db.add(sms_result)
+        self.db.flush()
+        return sms_result

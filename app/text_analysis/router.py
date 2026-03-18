@@ -5,13 +5,18 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas import (
+    SMSAnalyzeRequest,
+    SMSAnalyzeResponse,
     SMSModelPredictRequest,
     SMSModelPredictResponse,
+    SMSVectorSearchRequest,
+    SMSVectorSearchResponse,
     TextAnalyzeRequest,
     TextAnalyzeResponse,
 )
+from app.text_analysis.embedding_service import find_similar_sms_messages
 from app.text_analysis.model_inference import predict_sms_text
-from app.text_analysis.service import TextAnalysisService
+from app.text_analysis.service import SMSFraudAnalysisService, TextAnalysisService
 
 router = APIRouter(prefix="/text", tags=["text-analysis"])
 
@@ -42,3 +47,53 @@ def predict_sms_model(payload: SMSModelPredictRequest):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
     return SMSModelPredictResponse(prediction=prediction)
+
+
+@router.post("/sms/similarity", response_model=SMSVectorSearchResponse, status_code=status.HTTP_200_OK)
+def similarity_search_sms(payload: SMSVectorSearchRequest):
+    try:
+        result = find_similar_sms_messages(
+            text=payload.text,
+            top_k=payload.top_k,
+            threshold=payload.threshold,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    return SMSVectorSearchResponse(**result)
+
+
+@router.post("/sms/analyze", response_model=SMSAnalyzeResponse, status_code=status.HTTP_200_OK)
+def analyze_sms(payload: SMSAnalyzeRequest, request: Request, db: Session = Depends(get_db)):
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+
+    service = SMSFraudAnalysisService(db)
+    try:
+        result = service.analyze_sms(
+            text=payload.text,
+            top_k=payload.top_k,
+            similarity_threshold=payload.similarity_threshold,
+            user_id=user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (RuntimeError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    return SMSAnalyzeResponse(
+        request_id=result.request_id,
+        risk_score=result.risk_score,
+        fraud_type=result.fraud_type,
+        confidence=result.confidence,
+        flags=result.flags,
+        explanation=result.explanation,
+        nlp_score=result.nlp_score,
+        similarity_score=result.similarity_score,
+        stylometry_score=result.stylometry_score,
+        prediction=result.prediction,
+        similarity=SMSVectorSearchResponse(**result.similarity),
+        url_risk_score=result.url_risk_score,
+        urgency_score=result.urgency_score,
+    )
