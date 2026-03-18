@@ -1,0 +1,62 @@
+======================================================
+  📊  FINAL METRICS
+=======================================================
+  loss        : 0.0963
+  accuracy    : 0.9810
+  precision   : 0.9816
+  recall      : 0.9803
+  f1          : 0.9810
+
+  Pred dist : {0: 764, 1: 762}
+  ✅  Both classes predicted.
+
+  Confusion Matrix:
+              Pred=safe  Pred=scam
+  True=safe         749         14
+  True=scam          15        748
+
+              precision    recall  f1-score   support
+
+        safe       0.98      0.98      0.98       763
+        scam       0.98      0.98      0.98       763
+
+    accuracy                           0.98      1526
+   macro avg       0.98      0.98      0.98      1526
+weighted avg       0.98      0.98      0.98      1526
+
+  ✅  F1=0.9810 — above 0.75 threshold.
+Writing model shards: 100%
+ 1/1 [00:11<00:00, 11.78s/it]
+
+💾  Saved to ./sms_phishing_model/
+
+============================================================
+  🔮  EXAMPLE PREDICTIONS
+============================================================
+
+  OK   PRED    CONF    EXP  TEXT
+  ────────────────────────────────────────────────────────────────────────────────
+  ✅   SCAM  0.9989   SCAM  "URGENT: Your SBI account is blocked. Update KYC at http…"
+  ✅   SCAM  0.9973   SCAM  "Congratulations! You won Rs 10 Lakh in the RBI Draw. Pa…"
+  ✅   SCAM  0.9995   SCAM  "Your PhonePe account flagged. Reverify at http://phonep…"
+  ✅   SCAM  0.9996   SCAM  "Earn Rs 1200/day online. No experience. Pay Rs 999 regi…"
+  ✅   SCAM  0.9995   SCAM  "WINNER!! Selected to receive $900 prize. Call 090617014…"
+  ✅   SAFE  0.9997   SAFE  "Hey, are you coming to the party tonight? Let me know!"
+  ❌   SCAM  0.9861   SAFE  "Your OTP for login is 482910. Valid 5 minutes. Do not s…"
+  ✅   SAFE  0.9995   SAFE  "Reminder: dentist appointment tomorrow at 3 PM."
+  ✅   SAFE  0.9997   SAFE  "Mom said dinner is ready. Come home soon."
+  ✅   SAFE  0.9996   SAFE  "Meeting rescheduled to 4 PM. Please update your calenda…"
+  ✅   SAFE  0.9995   SAFE  "Thanks for your order! Package arrives Thursday."
+  ✅   SAFE  0.9992   SAFE  "Happy birthday! Wishing you a great year ahead 🎂"
+
+  Test accuracy: 11/12
+
+============================================================
+  ✅  COMPLETE
+============================================================
+  Model    : roberta-base
+  Train    : 13726 samples
+  Val      : 1526 samples
+  Best F1  : 0.9810
+  Saved    : ./sms_phishing_model/
+============================================================

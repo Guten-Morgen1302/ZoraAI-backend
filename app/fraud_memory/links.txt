@@ -1,4 +1,0 @@
-https://www.kaggle.com/datasets/junioralive/india-spam-sms-classification
-https://www.kaggle.com/datasets/ndarvind/phiusiil-phishing-url-dataset
-https://www.kaggle.com/datasets/wcukierski/enron-email-dataset
-https://www.kaggle.com/datasets/uciml/sms-spam-collection-dataset

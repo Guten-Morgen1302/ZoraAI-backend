@@ -12,7 +12,7 @@ DEFAULT_QDRANT_URL = (
     "https://2b00db0a-2c04-4acc-8aa1-ed063c56dcd4.eu-west-1-0.aws.cloud.qdrant.io:6333"
 )
 DEFAULT_QDRANT_API_KEY = "INSERT_API_KEY"
-DEFAULT_COLLECTION_NAME = "scam_embeddings"
+DEFAULT_COLLECTION_NAME = "fraud_vectors"
 DEFAULT_VECTOR_SIZE = 384
 
 
@@ -58,12 +58,26 @@ class QdrantVectorStore:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+        self.upsert_point(point_id=point_id, vector=embedding, payload=payload, wait=True)
+        return point_id
+
+    def upsert_point(self, point_id: str, vector: list[float], payload: dict[str, Any], wait: bool = True) -> str:
         self.client.upsert(
             collection_name=self.collection_name,
-            points=[{"id": point_id, "vector": embedding, "payload": payload}],
-            wait=True,
+            points=[{"id": point_id, "vector": vector, "payload": payload}],
+            wait=wait,
         )
         return point_id
+
+    def upsert_points(self, points: list[dict[str, Any]], wait: bool = True) -> None:
+        if not points:
+            return
+
+        self.client.upsert(
+            collection_name=self.collection_name,
+            points=points,
+            wait=wait,
+        )
 
     def search(self, embedding: list[float], limit: int = 5) -> list[dict[str, str | float | None]]:
         points = self.client.search(
