@@ -1,0 +1,4 @@
+From the app folder:
+python -m fraud_memory.run_ingest_text
+python -m fraud_memory.run_ingest_emails
+python -m fraud_memory.run_ingest_url_phishing

@@ -1,2 +1,5 @@
 .env
 venv/
+app/fraud_memory/data
+app/text_analysis/sms_analyzer/sms_model
+__pycache__/

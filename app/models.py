@@ -1,7 +1,8 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, DateTime
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Float, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from datetime import datetime
+from sqlalchemy.orm import relationship
 
 from .database import Base
 
@@ -27,4 +28,81 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PhishingRequest(Base):
+
+    __tablename__ = "phishing_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    user_id = Column(UUID(as_uuid=True), nullable=True)
+
+    text = Column(String, nullable=False)
+
+    source = Column(String, nullable=False) #should be email/sms/chat
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    analysis = relationship("PhishingAnalysis", back_populates="request", uselist=False)
+    sms_threat_result = relationship("SmsThreatResult", back_populates="request", uselist=False)
+
+
+class PhishingAnalysis(Base):
+
+    __tablename__ = "phishing_analysis"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    request_id = Column(UUID(as_uuid=True), ForeignKey("phishing_requests.id"), nullable=False, unique=True)
+
+    link_count = Column(Integer, nullable=False, default=0) # No. of urls detected in each req
+
+    urgency_score = Column(Float, nullable=False, default=0.0) #checks in urgency from the request..
+
+    status = Column(String, nullable=False, default="processing")
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    request = relationship("PhishingRequest", back_populates="analysis")
+
+
+class SmsThreatResult(Base):
+
+    __tablename__ = "sms_threat_results"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    request_id = Column(UUID(as_uuid=True), ForeignKey("phishing_requests.id"), nullable=False, unique=True)
+
+    result = Column(Text, nullable=False)
+
+    prediction = Column(Text, nullable=False)
+
+    explanation = Column(Text, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    request = relationship("PhishingRequest", back_populates="sms_threat_result")
+
+
+class ConfirmedFraudCase(Base):
+
+    __tablename__ = "confirmed_fraud_cases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    request_id = Column(UUID(as_uuid=True), ForeignKey("phishing_requests.id"), nullable=True)
+
+    user_id = Column(UUID(as_uuid=True), nullable=True)
+
+    text = Column(Text, nullable=False)
+
+    fraud_label = Column(String, nullable=False, default="phishing")
+
+    source = Column(String, nullable=False, default="sms")
+
+    vector_id = Column(String, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
