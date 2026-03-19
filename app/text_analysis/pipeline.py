@@ -184,6 +184,7 @@ def process_text(raw_message: str) -> dict[str, Any]:
     urls = preprocessing_output["urls"]
     url_features = extract_urls(cleaned_text)
     url_risk = analyze_urls(urls)
+    sanitized_urls = list(url_risk.get("sanitized_urls") or urls)
     urgency_score = detect_urgency(cleaned_text)
     stylometry_features = extract_stylometry(raw_text=raw_message, cleaned_text=cleaned_text)
     entities = extract_entities(cleaned_text)
@@ -191,7 +192,7 @@ def process_text(raw_message: str) -> dict[str, Any]:
     return {
         "clean_text": cleaned_text,
         "cleaned_text": cleaned_text,
-        "urls": urls,
+        "urls": sanitized_urls,
         "phones": preprocessing_output["phones"],
         "emails": preprocessing_output["emails"],
         "domain": url_features["domain"],

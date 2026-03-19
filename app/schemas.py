@@ -44,7 +44,7 @@ class TextAnalyzeResponse(BaseModel):
 
 
 class SMSModelPredictRequest(BaseModel):
-	text: str = Field(min_length=1, max_length=5000)
+	text: str = Field(min_length=1, max_length=4096)
 
 
 class SMSModelPredictResponse(BaseModel):
@@ -52,7 +52,7 @@ class SMSModelPredictResponse(BaseModel):
 
 
 class SMSVectorSearchRequest(BaseModel):
-	text: str = Field(min_length=1, max_length=5000)
+	text: str = Field(min_length=1, max_length=4096)
 
 
 class SMSVectorMatch(BaseModel):
@@ -77,7 +77,7 @@ class SMSVectorSearchResponse(BaseModel):
 
 
 class SMSAnalyzeRequest(BaseModel):
-	text: str = Field(min_length=1, max_length=5000)
+	text: str = Field(min_length=1, max_length=4096)
 	include_llm_explanation: bool = False
 
 

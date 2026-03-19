@@ -7,8 +7,6 @@ from app.database import get_db
 from app.schemas import (
     SMSAnalyzeRequest,
     SMSAnalyzeResponse,
-    SMSFraudFeedbackRequest,
-    SMSFraudFeedbackResponse,
     SMSModelPredictRequest,
     SMSModelPredictResponse,
     SMSVectorSearchRequest,
@@ -21,7 +19,6 @@ from app.text_analysis.model_inference import predict_sms_text
 from app.text_analysis.service import (
     DEFAULT_SIMILARITY_THRESHOLD,
     DEFAULT_SIMILARITY_TOP_K,
-    SMSContinuousLearningService,
     SMSFraudAnalysisService,
     TextAnalysisService,
 )
@@ -105,30 +102,4 @@ def analyze_sms(payload: SMSAnalyzeRequest, request: Request, db: Session = Depe
         similarity=SMSVectorSearchResponse(**result.similarity),
         url_risk_score=result.url_risk_score,
         urgency_score=result.urgency_score,
-    )
-
-
-@router.post("/sms/feedback/fraud", response_model=SMSFraudFeedbackResponse, status_code=status.HTTP_201_CREATED)
-def mark_sms_fraud(payload: SMSFraudFeedbackRequest, request: Request, db: Session = Depends(get_db)):
-    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
-
-    service = SMSContinuousLearningService(db)
-    try:
-        result = service.mark_confirmed_fraud(
-            request_id=payload.request_id,
-            text=payload.text,
-            fraud_label=payload.fraud_label,
-            source=payload.source.value,
-            user_id=user_id,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
-    return SMSFraudFeedbackResponse(
-        feedback_id=result.feedback_id,
-        request_id=result.request_id,
-        vector_id=result.vector_id,
-        status=result.status,
     )

@@ -5,6 +5,7 @@ from threading import Lock
 from typing import Any
 
 from app.fraud_memory.embedding_service import FraudMemoryEmbeddingService, get_embedding_service
+from app.text_analysis.preprocessing import validate_sms_text_quality
 
 
 @dataclass
@@ -26,14 +27,13 @@ class SMSVectorSimilarityService:
         self.embedding_service = embedding_service or get_embedding_service()
 
     def find_similar_messages(self, text: str, top_k: int = 5, threshold: float = 0.85) -> SMSVectorSimilarityResult:
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError("Input text must be a non-empty string")
+        validated_text = validate_sms_text_quality(text)
         if top_k <= 0:
             raise ValueError("top_k must be greater than 0")
         if threshold < 0 or threshold > 1:
             raise ValueError("threshold must be between 0 and 1")
 
-        matches = self.embedding_service.search_similar(text=text.strip(), limit=top_k)
+        matches = self.embedding_service.search_similar(text=validated_text, limit=top_k)
 
         best_match = matches[0] if matches else {}
         best_similarity = float(best_match.get("similarity") or 0.0)

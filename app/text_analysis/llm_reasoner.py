@@ -75,7 +75,7 @@ def build_prompt(data: dict[str, Any]) -> str:
     return (
         "You are a fraud detection expert specializing in SMS phishing, social engineering, try to explain the sms_text"
         "and scam pattern analysis.\n"
-        "You must reason only from the given evidence and return STRICT JSON only.\n"
+        "You must reason from the given evidence and sms_text and return STRICT JSON only.\n"
         "Do not include markdown, code blocks, or extra commentary.\n\n"
         "Evidence:\n"
         f"- SMS text: {sms_text}\n"
