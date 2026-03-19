@@ -53,8 +53,6 @@ class SMSModelPredictResponse(BaseModel):
 
 class SMSVectorSearchRequest(BaseModel):
 	text: str = Field(min_length=1, max_length=5000)
-	top_k: int = Field(default=5, ge=1, le=20)
-	threshold: float = Field(default=0.85, ge=0.0, le=1.0)
 
 
 class SMSVectorMatch(BaseModel):
@@ -80,8 +78,7 @@ class SMSVectorSearchResponse(BaseModel):
 
 class SMSAnalyzeRequest(BaseModel):
 	text: str = Field(min_length=1, max_length=5000)
-	top_k: int = Field(default=5, ge=1, le=20)
-	similarity_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+	include_llm_explanation: bool = False
 
 
 class SMSAnalyzeResponse(BaseModel):
@@ -91,6 +88,8 @@ class SMSAnalyzeResponse(BaseModel):
 	confidence: float
 	flags: list[str]
 	explanation: str
+	llm_enhanced: bool
+	llm_explanation: str | None = None
 	nlp_score: float
 	similarity_score: float
 	stylometry_score: float
@@ -98,3 +97,17 @@ class SMSAnalyzeResponse(BaseModel):
 	similarity: SMSVectorSearchResponse
 	url_risk_score: float
 	urgency_score: float
+
+
+class SMSFraudFeedbackRequest(BaseModel):
+	request_id: UUID | None = None
+	text: str | None = Field(default=None, min_length=1, max_length=5000)
+	fraud_label: str = Field(default="phishing", min_length=1, max_length=64)
+	source: MessageSource = MessageSource.sms
+
+
+class SMSFraudFeedbackResponse(BaseModel):
+	feedback_id: UUID
+	request_id: UUID | None = None
+	vector_id: str
+	status: str

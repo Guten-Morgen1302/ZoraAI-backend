@@ -85,3 +85,24 @@ class SmsThreatResult(Base):
 
     request = relationship("PhishingRequest", back_populates="sms_threat_result")
 
+
+class ConfirmedFraudCase(Base):
+
+    __tablename__ = "confirmed_fraud_cases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    request_id = Column(UUID(as_uuid=True), ForeignKey("phishing_requests.id"), nullable=True)
+
+    user_id = Column(UUID(as_uuid=True), nullable=True)
+
+    text = Column(Text, nullable=False)
+
+    fraud_label = Column(String, nullable=False, default="phishing")
+
+    source = Column(String, nullable=False, default="sms")
+
+    vector_id = Column(String, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+

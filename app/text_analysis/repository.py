@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy.orm import Session
 
-from app.models import PhishingAnalysis, PhishingRequest, SmsThreatResult
+from app.models import ConfirmedFraudCase, PhishingAnalysis, PhishingRequest, SmsThreatResult
 
 
 class PhishingRepository:
@@ -16,6 +18,9 @@ class PhishingRepository:
         self.db.add(phishing_request)
         self.db.flush()
         return phishing_request
+
+    def get_request_by_id(self, request_id: UUID) -> PhishingRequest | None:
+        return self.db.query(PhishingRequest).filter(PhishingRequest.id == request_id).first()
 
     def create_analysis(
         self,
@@ -50,3 +55,25 @@ class PhishingRepository:
         self.db.add(sms_result)
         self.db.flush()
         return sms_result
+
+    def create_confirmed_fraud_case(
+        self,
+        *,
+        request_id,
+        user_id,
+        text: str,
+        fraud_label: str,
+        source: str,
+        vector_id: str,
+    ) -> ConfirmedFraudCase:
+        fraud_case = ConfirmedFraudCase(
+            request_id=request_id,
+            user_id=user_id,
+            text=text,
+            fraud_label=fraud_label,
+            source=source,
+            vector_id=vector_id,
+        )
+        self.db.add(fraud_case)
+        self.db.flush()
+        return fraud_case

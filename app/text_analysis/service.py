@@ -2,15 +2,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.fraud_memory.embedding_service import get_embedding_service
 from app.text_analysis.embedding_service import find_similar_sms_messages
 from app.text_analysis.model_inference import predict_sms_text
 from app.text_analysis.pipeline import TextPreprocessingPipeline
 from app.text_analysis.repository import PhishingRepository
 from app.text_analysis.sms_analyzer.stylometry import predict_stylometry_score
 from app.text_analysis.threat_scoring import score_sms_threat
+
+DEFAULT_SIMILARITY_TOP_K = 3
+DEFAULT_SIMILARITY_THRESHOLD = 0.82
 
 
 @dataclass
@@ -29,6 +34,8 @@ class SMSAnalyzeResult:
     confidence: float
     flags: list[str]
     explanation: str
+    llm_enhanced: bool
+    llm_explanation: str | None
     nlp_score: float
     similarity_score: float
     stylometry_score: float
@@ -36,6 +43,14 @@ class SMSAnalyzeResult:
     similarity: dict
     url_risk_score: float
     urgency_score: float
+
+
+@dataclass
+class SMSFraudFeedbackResult:
+    feedback_id: str
+    request_id: str | None
+    vector_id: str
+    status: str
 
 
 class TextAnalysisService:
@@ -82,11 +97,27 @@ class SMSFraudAnalysisService:
         fallback = min(1.0, (0.7 * urgency_score) + (0.3 * url_risk_score))
         return {"stylometry_score": round(fallback, 4)}
 
+    @staticmethod
+    def _derive_rule_flags(cleaned_text: str) -> list[str]:
+        text = cleaned_text.lower()
+        flags: list[str] = []
+        phrase_map = {
+            "urgent": "urgent_language",
+            "verify now": "verify_now",
+            "account suspended": "account_suspended",
+            "click": "click_link",
+        }
+        for phrase, flag in phrase_map.items():
+            if phrase in text:
+                flags.append(flag)
+        return flags
+
     def analyze_sms(
         self,
         text: str,
-        top_k: int = 5,
-        similarity_threshold: float = 0.85,
+        top_k: int = DEFAULT_SIMILARITY_TOP_K,
+        similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
+        include_llm_explanation: bool = False,
         user_id: str | None = None,
     ) -> SMSAnalyzeResult:
         phishing_request = self.repository.create_request(text=text, source="sms", user_id=user_id)
@@ -95,7 +126,9 @@ class SMSFraudAnalysisService:
         features = preprocess_result.features
         cleaned_text = str(features.get("clean_text") or text)
         url_risk_score = float(features.get("url_risk_score") or 0.0)
+        url_risk_flags = list(features.get("url_risk_flags") or [])
         urgency_score = float(features.get("urgency_score") or 0.0)
+        rule_flags = self._derive_rule_flags(cleaned_text)
 
         prediction = predict_sms_text(cleaned_text)
 
@@ -114,14 +147,18 @@ class SMSFraudAnalysisService:
         )
 
         scoring = score_sms_threat(
+            sms_text=text,
             nlp_label=prediction.get("label"),
             nlp_confidence=float(prediction.get("confidence") or 0.0),
             similarity_score=float(similarity.get("similarity_score") or 0.0),
             stylometry_score=float(stylometry.get("stylometry_score") or 0.0),
             url_risk_score=url_risk_score,
+            url_flags=url_risk_flags,
+            rule_flags=rule_flags,
             urgency_score=urgency_score,
             matched_label=similarity.get("matched_label"),
             similarity_high_risk=bool(similarity.get("high_risk")),
+            force_llm_explanation=include_llm_explanation,
         )
 
         self.repository.create_analysis(
@@ -137,10 +174,14 @@ class SMSFraudAnalysisService:
             "confidence": scoring.confidence,
             "flags": scoring.flags,
             "explanation": scoring.explanation,
+            "llm_enhanced": scoring.llm_enhanced,
+            "llm_explanation": scoring.llm_explanation,
             "nlp_score": scoring.nlp_score,
             "similarity_score": scoring.similarity_score,
             "stylometry_score": scoring.stylometry_score,
             "url_risk_score": round(url_risk_score, 4),
+            "url_risk_flags": url_risk_flags,
+            "rule_flags": rule_flags,
             "urgency_score": round(urgency_score, 4),
             "similarity": similarity,
         }
@@ -160,6 +201,8 @@ class SMSFraudAnalysisService:
             confidence=scoring.confidence,
             flags=scoring.flags,
             explanation=scoring.explanation,
+            llm_enhanced=scoring.llm_enhanced,
+            llm_explanation=scoring.llm_explanation,
             nlp_score=scoring.nlp_score,
             similarity_score=scoring.similarity_score,
             stylometry_score=scoring.stylometry_score,
@@ -167,4 +210,63 @@ class SMSFraudAnalysisService:
             similarity=similarity,
             url_risk_score=round(url_risk_score, 4),
             urgency_score=round(urgency_score, 4),
+        )
+
+
+class SMSContinuousLearningService:
+    """Stores confirmed fraud labels in PostgreSQL and Qdrant to improve future detection."""
+
+    def __init__(self, db: Session):
+        self.repository = PhishingRepository(db)
+        self.db = db
+        self.embedding_service = get_embedding_service()
+
+    def mark_confirmed_fraud(
+        self,
+        *,
+        request_id: UUID | None,
+        text: str | None,
+        fraud_label: str,
+        source: str,
+        user_id,
+    ) -> SMSFraudFeedbackResult:
+        resolved_request = None
+        resolved_text = (text or "").strip()
+
+        if request_id is not None:
+            resolved_request = self.repository.get_request_by_id(request_id)
+            if resolved_request is None:
+                raise ValueError(f"request_id not found: {request_id}")
+
+            if not resolved_text:
+                resolved_text = resolved_request.text
+
+        if not resolved_text:
+            raise ValueError("Provide either request_id or text for confirmed fraud feedback")
+
+        normalized_label = fraud_label.strip().lower()
+        if not normalized_label:
+            raise ValueError("fraud_label must not be empty")
+
+        vector_result = self.embedding_service.store_embedding(
+            text=resolved_text,
+            fraud_label=normalized_label,
+        )
+        vector_id = vector_result["id"]
+
+        fraud_case = self.repository.create_confirmed_fraud_case(
+            request_id=resolved_request.id if resolved_request is not None else None,
+            user_id=user_id,
+            text=resolved_text,
+            fraud_label=normalized_label,
+            source=source,
+            vector_id=vector_id,
+        )
+        self.db.commit()
+
+        return SMSFraudFeedbackResult(
+            feedback_id=str(fraud_case.id),
+            request_id=str(resolved_request.id) if resolved_request is not None else None,
+            vector_id=vector_id,
+            status="stored",
         )
