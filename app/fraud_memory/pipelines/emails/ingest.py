@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import sys
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -10,16 +11,37 @@ try:
 except ModuleNotFoundError:
     from fraud_memory.qdrant_client import QdrantVectorStore, build_qdrant_client
 
-from .cleaning import extract_email_text, infer_email_label
+from .cleaning import (
+    extract_email_body,
+    extract_email_sender,
+    extract_email_subject,
+    extract_email_urls,
+    infer_email_label,
+)
 from .models import EmailFraudRecord
 
-DATA_FILE = Path(__file__).resolve().parents[2] / "data" / "data_email_scam" / "emails.csv"
+DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "data_email_scam"
+TARGET_DATASET_STEMS = {"cleaned_ceas", "nazario", "nigerian_fraud", "spamassasin"}
 MODEL_NAME = "all-MiniLM-L6-v2"
 VECTOR_SIZE = 384
 BATCH_SIZE = 128
-COLLECTION_NAME = "fraud_vectors"
+COLLECTION_NAME = "fraud_emails"
 
 _cached_model = None
+
+
+def _set_max_csv_field_size() -> None:
+    # Some datasets include extremely large fields; raise parser limit as much as runtime allows.
+    max_size = sys.maxsize
+    while max_size > 0:
+        try:
+            csv.field_size_limit(max_size)
+            return
+        except OverflowError:
+            max_size //= 10
+
+
+_set_max_csv_field_size()
 
 
 def _load_model():
@@ -55,23 +77,65 @@ class EmailIngestionPipeline:
         )
 
     def run(self) -> dict[str, int]:
-        if not DATA_FILE.exists():
-            print(f"[emails] Dataset not found: {DATA_FILE}")
+        if not DATA_DIR.exists():
+            print(f"[emails] Dataset folder not found: {DATA_DIR}")
             return {"processed": 0, "inserted": 0, "skipped": 0}
 
+        files = sorted(
+            [
+                p
+                for p in DATA_DIR.iterdir()
+                if p.is_file() and p.suffix.lower() == ".csv" and p.stem.lower() in TARGET_DATASET_STEMS
+            ]
+        )
+        if not files:
+            print(f"[emails] No target CSV files found in {DATA_DIR}")
+            return {"processed": 0, "inserted": 0, "skipped": 0}
+
+        summary = {"processed": 0, "inserted": 0, "skipped": 0}
+        for file_path in files:
+            file_stats = self._ingest_file(file_path)
+            summary["processed"] += file_stats["processed"]
+            summary["inserted"] += file_stats["inserted"]
+            summary["skipped"] += file_stats["skipped"]
+
+        print(
+            f"[emails] Ingestion completed: processed={summary['processed']} inserted={summary['inserted']} skipped={summary['skipped']}"
+        )
+        return summary
+
+    def _ingest_file(self, file_path: Path) -> dict[str, int]:
         stats = {"processed": 0, "inserted": 0, "skipped": 0}
         batch_points: list[dict[str, Any]] = []
 
-        print(f"[emails] Reading file: {DATA_FILE.name}")
-        with DATA_FILE.open("r", encoding="utf-8-sig", errors="replace", newline="") as fp:
+        print(f"[emails] Reading file: {file_path.name}")
+        with file_path.open("r", encoding="utf-8-sig", errors="replace", newline="") as fp:
             reader = csv.DictReader(fp)
-            for row in reader:
+            while True:
+                try:
+                    row = next(reader)
+                except StopIteration:
+                    break
+                except csv.Error as exc:
+                    print(f"[emails] Skipped malformed CSV row in {file_path.name}: {exc}")
+                    stats["skipped"] += 1
+                    continue
+
                 stats["processed"] += 1
-                record = EmailFraudRecord(
-                    text=extract_email_text(row),
-                    label=infer_email_label(row),
-                    source_file=DATA_FILE.name,
-                )
+                try:
+                    record = EmailFraudRecord(
+                        text=extract_email_body(row),
+                        subject=extract_email_subject(row),
+                        sender=extract_email_sender(row),
+                        urls=extract_email_urls(row),
+                        label=infer_email_label(row),
+                        source_file=file_path.name,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[emails] Skipped row due to preprocessing error in {file_path.name}: {exc}")
+                    stats["skipped"] += 1
+                    continue
+
                 if not record.text:
                     stats["skipped"] += 1
                     continue
@@ -85,27 +149,43 @@ class EmailIngestionPipeline:
 
                 payload = {
                     "text": record.text,
+                    "subject": record.subject,
+                    "sender": record.sender,
+                    "urls": record.urls,
                     "label": record.label,
-                    "source_file": record.source_file,
-                    "source": "emails",
+                    "type": "email",
+                    "source": "dataset",
                 }
                 batch_points.append({"id": str(uuid4()), "vector": vector, "payload": payload})
 
                 if len(batch_points) >= BATCH_SIZE:
-                    print(f"[emails] Upserting batch of {len(batch_points)} from {DATA_FILE.name}")
-                    self.vector_store.upsert_points(batch_points, wait=True)
-                    stats["inserted"] += len(batch_points)
+                    print(f"[emails] Upserting batch of {len(batch_points)} from {file_path.name}")
+                    inserted, skipped = self._safe_upsert_batch(batch_points, file_path.name)
+                    stats["inserted"] += inserted
+                    stats["skipped"] += skipped
                     batch_points.clear()
 
         if batch_points:
-            print(f"[emails] Upserting final batch of {len(batch_points)} from {DATA_FILE.name}")
-            self.vector_store.upsert_points(batch_points, wait=True)
-            stats["inserted"] += len(batch_points)
+            print(f"[emails] Upserting final batch of {len(batch_points)} from {file_path.name}")
+            inserted, skipped = self._safe_upsert_batch(batch_points, file_path.name)
+            stats["inserted"] += inserted
+            stats["skipped"] += skipped
 
         print(
-            f"[emails] Ingestion completed for {DATA_FILE.name}: processed={stats['processed']} inserted={stats['inserted']} skipped={stats['skipped']}"
+            f"[emails] Ingestion completed for {file_path.name}: processed={stats['processed']} inserted={stats['inserted']} skipped={stats['skipped']}"
         )
         return stats
+
+    def _safe_upsert_batch(self, points: list[dict[str, Any]], source_file: str) -> tuple[int, int]:
+        try:
+            self.vector_store.upsert_points(points, wait=True)
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[emails] Batch upsert failed for {source_file} with {len(points)} points. "
+                f"Skipping this batch. Error: {exc}"
+            )
+            return (0, len(points))
+        return (len(points), 0)
 
 
 def run_email_ingestion() -> dict[str, int]:
