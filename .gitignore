@@ -5,3 +5,4 @@ app/text_analysis/sms_analyzer/sms_model
 __pycache__/
 app/text_analysis/email_analyzer/email_model
 app/text_analysis/email_analyzer/gmail_client_secrets.json
+frontend/

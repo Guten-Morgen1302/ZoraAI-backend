@@ -14,7 +14,7 @@ logger = logging.getLogger("zora.middleware")
 
 class AuthLoggingMiddleware(BaseHTTPMiddleware):
     AUTH_EXEMPT_PATHS = {"/", "/openapi.json"}
-    AUTH_EXEMPT_PATH_PREFIXES = ("/docs", "/redoc", "/auth")
+    AUTH_EXEMPT_PATH_PREFIXES = ("/docs", "/redoc", "/auth","/text/email/analyze/extension")
     RATE_LIMIT_EXEMPT_PATHS = {"/", "/openapi.json"}
     RATE_LIMIT_EXEMPT_PATH_PREFIXES = ("/docs", "/redoc")
 
@@ -38,6 +38,10 @@ class AuthLoggingMiddleware(BaseHTTPMiddleware):
         return path in self.RATE_LIMIT_EXEMPT_PATHS or path.startswith(self.RATE_LIMIT_EXEMPT_PATH_PREFIXES)
 
     async def dispatch(self, request: Request, call_next):
+
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         logger.info("Incoming request", extra={"path": request.url.path, "method": request.method})
 
         path = request.url.path
