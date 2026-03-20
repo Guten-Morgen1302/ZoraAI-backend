@@ -129,18 +129,21 @@ class LatestEmailFetchResponse(BaseModel):
 class LatestEmailAnalyzeRequest(BaseModel):
 	query: str | None = Field(default=None, max_length=500)
 	force_reauth: bool = True
+	with_llm_explanation: bool = False
 
 
 class EmailAnalyzeByIdRequest(BaseModel):
 	thread_id: str = Field(min_length=1, max_length=256)
 	message_id: str = Field(min_length=1, max_length=256)
 	force_reauth: bool = False
+	with_llm_explanation: bool = False
 
 
 class EmailAnalyzeManualRequest(BaseModel):
 	sender: str = Field(min_length=1, max_length=512)
 	subject: str = Field(default="", max_length=1000)
 	body: str = Field(min_length=1, max_length=100000)
+	with_llm_explanation: bool = False
 
 
 class LatestEmailAnalyzeResponse(BaseModel):
@@ -157,3 +160,7 @@ class LatestEmailAnalyzeResponse(BaseModel):
 	fraud_type: str
 	nlp_prediction: dict[str, Any]
 	similarity: dict[str, Any]
+	llm_enhanced: bool
+	llm_explanation: str | None = None
+	llm_label: str | None = None
+	llm_confidence: float | None = None

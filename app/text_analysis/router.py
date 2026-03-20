@@ -31,6 +31,7 @@ from app.text_analysis.email_analyzer.model_inference import predict_email_text
 from app.text_analysis.email_analyzer.similarity import find_similar_email_messages
 from app.text_analysis.email_analyzer.stylometry import predict_stylometry_score
 from app.text_analysis.email_analyzer.threat_scoring import score_email_threat
+from app.text_analysis.email_analyzer.llm_reasoner import explain_email_with_llm
 from app.text_analysis.email_preprocessing import preprocess_email_message
 from app.text_analysis.embedding_service import find_similar_sms_messages
 from app.text_analysis.model_inference import predict_sms_text
@@ -54,7 +55,15 @@ def _truncate_body_preview(body: str, max_chars: int = 180) -> str:
     return f"{snippet[:max_chars]}..."
 
 
-def _run_email_full_analysis(*, message_id: str, thread_id: str | None, sender: str, subject: str, body: str):
+def _run_email_full_analysis(
+    *,
+    message_id: str,
+    thread_id: str | None,
+    sender: str,
+    subject: str,
+    body: str,
+    with_llm_explanation: bool = False,
+):
     preprocessing = preprocess_email_message(sender=sender, subject=subject, body=body)
     model_input = str(preprocessing.get("normalized_text") or "")
 
@@ -73,6 +82,30 @@ def _run_email_full_analysis(*, message_id: str, thread_id: str | None, sender: 
         stylometry_score=float(stylometry.get("stylometry_score") or 0.0),
     )
 
+    llm_enhanced = False
+    llm_explanation: str | None = None
+    llm_label: str | None = None
+    llm_confidence: float | None = None
+
+    if with_llm_explanation:
+        print("[email-debug] LLM explanation requested; calling OpenRouter")
+        llm_result = explain_email_with_llm(
+            {
+                "sender": sender,
+                "subject": subject,
+                "body": body,
+                "nlp_label": nlp_prediction.get("label"),
+                "nlp_score": scoring.nlp_score,
+                "similarity_score": scoring.similarity_score,
+                "stylometry_score": scoring.stylometry_score,
+                "risk_score": scoring.final_score,
+            }
+        )
+        llm_label = str(llm_result.get("final_label") or "unknown")
+        llm_confidence = float(llm_result.get("confidence") or 0.0)
+        llm_explanation = str(llm_result.get("explanation") or "").strip() or None
+        llm_enhanced = llm_explanation is not None
+
     return LatestEmailAnalyzeResponse(
         message_id=message_id,
         thread_id=thread_id,
@@ -87,6 +120,10 @@ def _run_email_full_analysis(*, message_id: str, thread_id: str | None, sender: 
         fraud_type=scoring.fraud_type,
         nlp_prediction=nlp_prediction,
         similarity=similarity,
+        llm_enhanced=llm_enhanced,
+        llm_explanation=llm_explanation,
+        llm_label=llm_label,
+        llm_confidence=llm_confidence,
     )
 
 ## API route for analyzing text
@@ -232,6 +269,7 @@ def fetch_latest_email_and_analyze(payload: LatestEmailAnalyzeRequest):
             sender=sender,
             subject=subject,
             body=body,
+            with_llm_explanation=payload.with_llm_explanation,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -267,6 +305,7 @@ def analyze_email_by_ids(payload: EmailAnalyzeByIdRequest):
             sender=str(email_data.get("sender") or ""),
             subject=str(email_data.get("subject") or ""),
             body=str(email_data.get("body") or ""),
+            with_llm_explanation=payload.with_llm_explanation,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -276,7 +315,7 @@ def analyze_email_by_ids(payload: EmailAnalyzeByIdRequest):
 
 @router.post("/email/analyze/extension", response_model=LatestEmailAnalyzeResponse, status_code=status.HTTP_200_OK)
 def analyze_email_manual(payload: EmailAnalyzeManualRequest):
-    print("[email-debug] Starting /text/email/analyze/manual")
+    print("[email-debug] Starting /text/email/analyze/extension")
     try:
         return _run_email_full_analysis(
             message_id="manual-input",
@@ -284,6 +323,7 @@ def analyze_email_manual(payload: EmailAnalyzeManualRequest):
             sender=payload.sender,
             subject=payload.subject,
             body=payload.body,
+            with_llm_explanation=payload.with_llm_explanation,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
