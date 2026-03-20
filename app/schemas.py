@@ -111,3 +111,49 @@ class SMSFraudFeedbackResponse(BaseModel):
 	request_id: UUID | None = None
 	vector_id: str
 	status: str
+
+
+class LatestEmailFetchRequest(BaseModel):
+	query: str | None = Field(default=None, max_length=500)
+
+
+class LatestEmailFetchResponse(BaseModel):
+	message_id: str
+	thread_id: str | None = None
+	sender: str
+	subject: str
+	body: str
+	preprocessing: dict[str, Any]
+
+
+class LatestEmailAnalyzeRequest(BaseModel):
+	query: str | None = Field(default=None, max_length=500)
+	force_reauth: bool = True
+
+
+class EmailAnalyzeByIdRequest(BaseModel):
+	thread_id: str = Field(min_length=1, max_length=256)
+	message_id: str = Field(min_length=1, max_length=256)
+	force_reauth: bool = False
+
+
+class EmailAnalyzeManualRequest(BaseModel):
+	sender: str = Field(min_length=1, max_length=512)
+	subject: str = Field(default="", max_length=1000)
+	body: str = Field(min_length=1, max_length=100000)
+
+
+class LatestEmailAnalyzeResponse(BaseModel):
+	message_id: str
+	thread_id: str | None = None
+	sender: str
+	subject: str
+	body: str
+	risk_score: float
+	nlp_score: float
+	similarity_score: float
+	stylometry_score: float
+	confidence: float
+	fraud_type: str
+	nlp_prediction: dict[str, Any]
+	similarity: dict[str, Any]
