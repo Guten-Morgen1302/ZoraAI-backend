@@ -6,3 +6,4 @@ __pycache__/
 app/text_analysis/email_analyzer/email_model
 app/text_analysis/email_analyzer/gmail_client_secrets.json
 frontend/
+todos.txt

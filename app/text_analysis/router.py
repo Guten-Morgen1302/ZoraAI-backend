@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -35,6 +36,7 @@ from app.text_analysis.email_analyzer.llm_reasoner import explain_email_with_llm
 from app.text_analysis.email_preprocessing import preprocess_email_message
 from app.text_analysis.embedding_service import find_similar_sms_messages
 from app.text_analysis.model_inference import predict_sms_text
+from app.text_analysis.repository import PhishingRepository
 from app.text_analysis.service import (
     DEFAULT_SIMILARITY_THRESHOLD,
     DEFAULT_SIMILARITY_TOP_K,
@@ -57,13 +59,17 @@ def _truncate_body_preview(body: str, max_chars: int = 180) -> str:
 
 def _run_email_full_analysis(
     *,
+    db: Session,
     message_id: str,
     thread_id: str | None,
     sender: str,
     subject: str,
     body: str,
     with_llm_explanation: bool = False,
+    user_id: str | None = None,
 ):
+    repository = PhishingRepository(db)
+
     preprocessing = preprocess_email_message(sender=sender, subject=subject, body=body)
     model_input = str(preprocessing.get("normalized_text") or "")
 
@@ -105,6 +111,50 @@ def _run_email_full_analysis(
         llm_confidence = float(llm_result.get("confidence") or 0.0)
         llm_explanation = str(llm_result.get("explanation") or "").strip() or None
         llm_enhanced = llm_explanation is not None
+
+    request_text = f"From: {sender}\nSubject: {subject}\n\n{body}".strip()
+    phishing_request = repository.create_request(
+        text=request_text,
+        source="email",
+        user_id=user_id,
+    )
+
+    feature_map = preprocessing.get("features") or {}
+    link_count = int(feature_map.get("url_count") or len(preprocessing.get("urls") or []))
+    urgency_score = float(feature_map.get("urgency_score") or 0.0)
+
+    repository.create_analysis(
+        request_id=phishing_request.id,
+        link_count=link_count,
+        urgency_score=urgency_score,
+        status="completed",
+    )
+
+    response_payload = {
+        "message_id": message_id,
+        "thread_id": thread_id,
+        "sender": sender,
+        "subject": subject,
+        "body": _truncate_body_preview(body),
+        "risk_score": scoring.final_score,
+        "nlp_score": scoring.nlp_score,
+        "similarity_score": scoring.similarity_score,
+        "stylometry_score": scoring.stylometry_score,
+        "confidence": scoring.confidence,
+        "fraud_type": scoring.fraud_type,
+        "llm_enhanced": llm_enhanced,
+        "llm_explanation": llm_explanation,
+        "llm_label": llm_label,
+        "llm_confidence": llm_confidence,
+    }
+
+    repository.create_email_threat_result(
+        request_id=phishing_request.id,
+        result=json.dumps(response_payload),
+        prediction=json.dumps(nlp_prediction),
+        explanation=llm_explanation or scoring.fraud_type,
+    )
+    db.commit()
 
     return LatestEmailAnalyzeResponse(
         message_id=message_id,
@@ -238,7 +288,7 @@ def fetch_and_preprocess_latest_email(payload: LatestEmailFetchRequest | None = 
 
 
 @router.post("/email/analyze/latest", response_model=LatestEmailAnalyzeResponse, status_code=status.HTTP_200_OK)
-def fetch_latest_email_and_analyze(payload: LatestEmailAnalyzeRequest):
+def fetch_latest_email_and_analyze(payload: LatestEmailAnalyzeRequest, request: Request, db: Session = Depends(get_db)):
     print(
         "[email-debug] Starting /text/email/analyze/latest "
         f"query={payload.query!r} force_reauth={payload.force_reauth}"
@@ -262,14 +312,17 @@ def fetch_latest_email_and_analyze(payload: LatestEmailAnalyzeRequest):
     body = str(latest_email.get("body") or "")
 
     print(f"[email-debug] Running NLP + similarity + stylometry for message_id={latest_email.get('message_id')}")
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
     try:
         return _run_email_full_analysis(
+            db=db,
             message_id=str(latest_email.get("message_id") or ""),
             thread_id=latest_email.get("thread_id"),
             sender=sender,
             subject=subject,
             body=body,
             with_llm_explanation=payload.with_llm_explanation,
+            user_id=user_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -278,7 +331,7 @@ def fetch_latest_email_and_analyze(payload: LatestEmailAnalyzeRequest):
 
 
 @router.post("/email/analyze/by-id", response_model=LatestEmailAnalyzeResponse, status_code=status.HTTP_200_OK)
-def analyze_email_by_ids(payload: EmailAnalyzeByIdRequest):
+def analyze_email_by_ids(payload: EmailAnalyzeByIdRequest, request: Request, db: Session = Depends(get_db)):
     print(
         "[email-debug] Starting /text/email/analyze/by-id "
         f"message_id={payload.message_id!r} thread_id={payload.thread_id!r}"
@@ -299,13 +352,16 @@ def analyze_email_by_ids(payload: EmailAnalyzeByIdRequest):
         ) from exc
 
     try:
+        user_id = request.state.user_id if hasattr(request.state, "user_id") else None
         return _run_email_full_analysis(
+            db=db,
             message_id=str(email_data.get("message_id") or ""),
             thread_id=email_data.get("thread_id"),
             sender=str(email_data.get("sender") or ""),
             subject=str(email_data.get("subject") or ""),
             body=str(email_data.get("body") or ""),
             with_llm_explanation=payload.with_llm_explanation,
+            user_id=user_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -314,16 +370,19 @@ def analyze_email_by_ids(payload: EmailAnalyzeByIdRequest):
 
 
 @router.post("/email/analyze/extension", response_model=LatestEmailAnalyzeResponse, status_code=status.HTTP_200_OK)
-def analyze_email_manual(payload: EmailAnalyzeManualRequest):
+def analyze_email_manual(payload: EmailAnalyzeManualRequest, request: Request, db: Session = Depends(get_db)):
     print("[email-debug] Starting /text/email/analyze/extension")
     try:
+        user_id = request.state.user_id if hasattr(request.state, "user_id") else None
         return _run_email_full_analysis(
+            db=db,
             message_id="manual-input",
             thread_id="manual-input",
             sender=payload.sender,
             subject=payload.subject,
             body=payload.body,
             with_llm_explanation=payload.with_llm_explanation,
+            user_id=user_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
