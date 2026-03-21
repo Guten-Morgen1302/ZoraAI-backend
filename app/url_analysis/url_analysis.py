@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.url_analysis.cookie_analyzer import analyze_cookies
 from app.url_analysis.domain_intelligence import extract_domain_features
 from app.url_analysis.feature_extractor import extract_url_features
+from app.url_analysis.homoglyph_detector import extract_homoglyph_features
+from app.url_analysis.sandbox_analyzer import analyze_url as analyze_url_in_sandbox
 from app.url_analysis.tls_intelligence import extract_tls_features
 
 
@@ -24,6 +27,35 @@ def extract_phase_2_features(input_value: str) -> dict[str, Any]:
     return payload
 
 
+def extract_phase_3_features(input_value: str) -> dict[str, Any]:
+    """Run phase 3 features (phase 2 + homoglyph/punycode intelligence)."""
+    payload: dict[str, Any] = extract_phase_2_features(input_value)
+    payload["homoglyph_features"] = extract_homoglyph_features(input_value)
+    return payload
+
+
+async def extract_phase_4_features_async(input_value: str) -> dict[str, Any]:
+    """Run phase 4 features (phase 3 + headless sandbox intelligence)."""
+    payload: dict[str, Any] = extract_phase_3_features(input_value)
+    sandbox_features = await analyze_url_in_sandbox(input_value)
+
+    cookie_features = analyze_cookies(
+        cookies=sandbox_features.get("cookies"),
+        cookies_before_login=sandbox_features.get("cookies_before_login"),
+        cookies_after_login=sandbox_features.get("cookies_after_login"),
+    )
+
+    sandbox_features["cookie_analysis"] = cookie_features
+    payload["sandbox_features"] = sandbox_features
+    payload["cookie_features"] = cookie_features
+    return payload
+
+
 def extract_all_features(input_value: str) -> dict[str, Any]:
-    """Run the complete layered URL analysis pipeline."""
-    return extract_phase_2_features(input_value)
+    """Run complete sync pipeline up to phase 3 (without async sandbox)."""
+    return extract_phase_3_features(input_value)
+
+
+async def extract_all_features_async(input_value: str) -> dict[str, Any]:
+    """Run the complete layered URL analysis pipeline including sandbox phase."""
+    return await extract_phase_4_features_async(input_value)
