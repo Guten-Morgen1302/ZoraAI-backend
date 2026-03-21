@@ -8,7 +8,17 @@ from app.url_analysis.cookie_analyzer import (
 	detect_session_fixation,
 )
 from app.url_analysis.domain_intelligence import extract_domain_features
+from app.url_analysis.dataset_converter import URLDatasetToFusionCSVConverter
 from app.url_analysis.feature_extractor import extract_url_features
+from app.url_analysis.feature_fusion_engine import FeatureFusionEngine
+from app.url_analysis.fingerprint_beacon_analyzer import (
+	FINGERPRINT_BEACON_INIT_SCRIPT,
+	analyze_network_for_beaconing,
+	analyze_page_fingerprint_and_beaconing,
+	analyze_url_fingerprint_and_beaconing,
+	beaconing_risk,
+	fingerprinting_risk,
+)
 from app.url_analysis.homoglyph_detector import extract_homoglyph_features
 from app.url_analysis.js_behavior_analyzer import (
 	analyze_javascript_behavior,
@@ -18,6 +28,14 @@ from app.url_analysis.js_behavior_analyzer import (
 	detect_dangerous_functions,
 	detect_hidden_forms,
 	detect_obfuscation,
+)
+from app.url_analysis.ml_risk_engine import URLMLRiskEngine
+from app.url_analysis.phishing_behavior_analyzer import (
+	analyze_csp_headers,
+	analyze_iframes,
+	analyze_page_phishing_behavior,
+	analyze_redirect_chain,
+	analyze_url_phishing_behavior,
 )
 from app.url_analysis.sandbox_analyzer import analyze_url, analyze_url_sync
 from app.url_analysis.tls_intelligence import extract_tls_features
@@ -36,7 +54,15 @@ __all__ = [
 	"compute_cookie_score",
 	"detect_session_fixation",
 	"analyze_cookies",
+	"URLDatasetToFusionCSVConverter",
 	"extract_url_features",
+	"FeatureFusionEngine",
+	"FINGERPRINT_BEACON_INIT_SCRIPT",
+	"fingerprinting_risk",
+	"beaconing_risk",
+	"analyze_network_for_beaconing",
+	"analyze_page_fingerprint_and_beaconing",
+	"analyze_url_fingerprint_and_beaconing",
 	"extract_domain_features",
 	"extract_tls_features",
 	"extract_homoglyph_features",
@@ -47,6 +73,12 @@ __all__ = [
 	"detect_hidden_forms",
 	"compute_complexity",
 	"calculate_risk_score",
+	"URLMLRiskEngine",
+	"analyze_redirect_chain",
+	"analyze_iframes",
+	"analyze_csp_headers",
+	"analyze_page_phishing_behavior",
+	"analyze_url_phishing_behavior",
 	"analyze_url",
 	"analyze_url_sync",
 	"extract_phase_1_features",

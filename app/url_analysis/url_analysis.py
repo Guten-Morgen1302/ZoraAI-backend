@@ -6,10 +6,14 @@ from typing import Any
 
 from app.url_analysis.cookie_analyzer import analyze_cookies
 from app.url_analysis.domain_intelligence import extract_domain_features
+from app.url_analysis.feature_fusion_engine import FeatureFusionEngine
 from app.url_analysis.feature_extractor import extract_url_features
 from app.url_analysis.homoglyph_detector import extract_homoglyph_features
 from app.url_analysis.sandbox_analyzer import analyze_url as analyze_url_in_sandbox
 from app.url_analysis.tls_intelligence import extract_tls_features
+
+
+_FEATURE_FUSION_ENGINE = FeatureFusionEngine()
 
 
 def extract_phase_1_features(input_value: str) -> dict[str, Any]:
@@ -48,6 +52,13 @@ async def extract_phase_4_features_async(input_value: str) -> dict[str, Any]:
     sandbox_features["cookie_analysis"] = cookie_features
     payload["sandbox_features"] = sandbox_features
     payload["cookie_features"] = cookie_features
+    payload["phishing_behavior_features"] = sandbox_features.get(
+        "phishing_behavior_analysis", {}
+    )
+    payload["fingerprint_beacon_features"] = sandbox_features.get(
+        "fingerprint_beacon_analysis", {}
+    )
+    payload["fused_features"] = _FEATURE_FUSION_ENGINE.fuse_features(payload)
     return payload
 
 

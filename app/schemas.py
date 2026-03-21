@@ -164,3 +164,35 @@ class LatestEmailAnalyzeResponse(BaseModel):
 	llm_explanation: str | None = None
 	llm_label: str | None = None
 	llm_confidence: float | None = None
+
+
+class URLAnalyzeRequest(BaseModel):
+	url: str = Field(min_length=4, max_length=4096)
+	with_llm_explanation: bool = True
+
+
+class URLAnalyzeResponse(BaseModel):
+	request_id: UUID | None = None
+	url: str
+	phishing_probability: float
+	risk_score: float
+	risk_level: str
+	model: str
+	persisted: bool = False
+	pipeline_checks: dict[str, Any]
+	risk_components: dict[str, float]
+	llm_enhanced: bool
+	llm_label: str | None = None
+	llm_confidence: float | None = None
+	llm_explanation: str | None = None
+	llm_key_indicators: list[str] = Field(default_factory=list)
+	llm_recommendations: list[str] = Field(default_factory=list)
+	url_features: dict[str, Any]
+	domain_features: dict[str, Any]
+	tls_features: dict[str, Any]
+	homoglyph_features: dict[str, Any]
+	sandbox_features: dict[str, Any]
+	cookie_features: dict[str, Any]
+	phishing_behavior_features: dict[str, Any]
+	fingerprint_beacon_features: dict[str, Any]
+	fused_features: dict[str, Any]

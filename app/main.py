@@ -6,6 +6,7 @@ from app.database import engine
 from app.models import Base
 from app.auth.router import router as auth_router
 from app.text_analysis.router import router as text_analysis_router
+from app.url_analysis.router import router as url_analysis_router
 from app.middleware.auth_logging import AuthLoggingMiddleware
 
 
@@ -31,6 +32,7 @@ Base.metadata.create_all(bind=engine)
 
 app.include_router(auth_router)
 app.include_router(text_analysis_router)
+app.include_router(url_analysis_router)
 
 @app.get("/")
 def home():

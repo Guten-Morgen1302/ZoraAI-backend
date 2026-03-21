@@ -16,6 +16,12 @@ _TLD_EXTRACTOR = (
     tldextract.TLDExtract(suffix_list_urls=None) if tldextract is not None else None
 )
 
+from app.url_analysis.phishing_behavior_analyzer import analyze_page_phishing_behavior
+from app.url_analysis.fingerprint_beacon_analyzer import (
+    FINGERPRINT_BEACON_INIT_SCRIPT,
+    analyze_page_fingerprint_and_beaconing,
+)
+
 DEFAULT_TIMEOUT_MS = 18_000
 MAX_NETWORK_LOGS = 500
 
@@ -50,6 +56,8 @@ def _safe_output(initial_url: str = "") -> dict[str, Any]:
         "suspicious_endpoints": [],
         "set_cookie_headers": [],
         "cookies": [],
+        "phishing_behavior_analysis": {},
+        "fingerprint_beacon_analysis": {},
         "error": "",
     }
 
@@ -113,7 +121,7 @@ async def launch_browser() -> tuple[Any, Any]:
 
     playwright = await async_playwright().start()
     browser = await playwright.chromium.launch(
-        headless=False,
+        headless=True,
         args=[
             "--disable-notifications",
             "--disable-popup-blocking",
@@ -288,6 +296,7 @@ async def analyze_url(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[st
             })();
             """
         )
+        await context.add_init_script(FINGERPRINT_BEACON_INIT_SCRIPT)
 
         page = await context.new_page()
         await page.set_viewport_size({"width": 1366, "height": 768})
@@ -312,6 +321,21 @@ async def analyze_url(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[st
             if nav_url and nav_url not in redirect_chain:
                 redirect_chain.append(nav_url)
 
+        phishing_behavior_analysis = await analyze_page_phishing_behavior(
+            page=page,
+            initial_url=normalized_url,
+            final_url=final_url,
+            redirect_chain=redirect_chain,
+            responses=network_state["responses"],
+            network_requests=network_state["network_requests"],
+        )
+
+        fingerprint_beacon_analysis = await analyze_page_fingerprint_and_beaconing(
+            page=page,
+            main_page_url=final_url,
+            network_requests=network_state["network_requests"],
+        )
+
         output.update(
             {
                 "initial_url": normalized_url,
@@ -326,6 +350,8 @@ async def analyze_url(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[st
                 "suspicious_endpoints": network_state["suspicious_endpoints"],
                 "set_cookie_headers": set_cookie_headers,
                 "cookies": cookies,
+                "phishing_behavior_analysis": phishing_behavior_analysis,
+                "fingerprint_beacon_analysis": fingerprint_beacon_analysis,
                 "error": "",
             }
         )
