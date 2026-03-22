@@ -126,3 +126,41 @@ class ConfirmedFraudCase(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+
+class URLAnalysisRequest(Base):
+
+    __tablename__ = "url_analysis_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    user_id = Column(UUID(as_uuid=True), nullable=True)
+
+    source_url = Column(Text, nullable=False)
+
+    normalized_url = Column(Text, nullable=False)
+
+    status = Column(String, nullable=False, default="processing")
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    result = relationship("URLThreatResult", back_populates="request", uselist=False)
+
+
+class URLThreatResult(Base):
+
+    __tablename__ = "url_threat_results"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    request_id = Column(UUID(as_uuid=True), ForeignKey("url_analysis_requests.id"), nullable=False, unique=True)
+
+    result = Column(Text, nullable=False)
+
+    prediction = Column(Text, nullable=False)
+
+    explanation = Column(Text, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    request = relationship("URLAnalysisRequest", back_populates="result")
+
