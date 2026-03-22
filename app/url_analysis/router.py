@@ -139,14 +139,13 @@ def _build_pipeline_checks(phase_payload: dict[str, object]) -> dict[str, object
         fused_features = {}
 
     sandbox_error = str(sandbox_features.get("error") or "").strip()
-    whois_age = _to_float(domain_features.get("domain_age_days"), 0.0)
     whois_registrar = str(domain_features.get("registrar") or "").strip()
-    whois_creation = str(domain_features.get("domain_creation_date") or "").strip()
+    whois_private_present = "is_whois_private" in domain_features
 
     return {
         "phase_1_static_extracted": bool(url_features) and bool(domain_features),
-        "whois_extractor_invoked": "domain_age_days" in domain_features and "registrar" in domain_features,
-        "whois_has_live_data": bool(whois_registrar or whois_creation or whois_age > 0),
+        "whois_extractor_invoked": "registrar" in domain_features and whois_private_present,
+        "whois_has_live_data": bool(whois_registrar),
         "phase_2_tls_extracted": bool(tls_features),
         "phase_3_homoglyph_extracted": bool(homoglyph_features),
         "playwright_sandbox_invoked": bool(sandbox_features),
@@ -173,6 +172,16 @@ def _safe_user_uuid(request: Request) -> uuid.UUID | None:
         return uuid.UUID(str(state_user))
     except (ValueError, TypeError):
         return None
+
+
+def _sandbox_features_for_response(sandbox_features: object) -> dict[str, object]:
+    """Return sandbox features with heavy HTML removed from API response payload."""
+    if not isinstance(sandbox_features, dict):
+        return {}
+
+    sanitized = dict(sandbox_features)
+    sanitized.pop("raw_html", None)
+    return sanitized
 
 
 @router.post("/analyze", response_model=URLAnalyzeResponse, status_code=status.HTTP_200_OK)
@@ -262,6 +271,7 @@ async def analyze_url(payload: URLAnalyzeRequest, request: Request, db: Session 
         components = {}
 
     pipeline_checks = _build_pipeline_checks(phase_payload)
+    sandbox_features_response = _sandbox_features_for_response(phase_payload.get("sandbox_features", {}))
 
     response_payload = {
         "request_id": str(request_row.id),
@@ -289,7 +299,7 @@ async def analyze_url(payload: URLAnalyzeRequest, request: Request, db: Session 
         "domain_features": phase_payload.get("domain_features", {}),
         "tls_features": phase_payload.get("tls_features", {}),
         "homoglyph_features": phase_payload.get("homoglyph_features", {}),
-        "sandbox_features": phase_payload.get("sandbox_features", {}),
+        "sandbox_features": sandbox_features_response,
         "cookie_features": phase_payload.get("cookie_features", {}),
         "phishing_behavior_features": phase_payload.get("phishing_behavior_features", {}),
         "fingerprint_beacon_features": phase_payload.get("fingerprint_beacon_features", {}),

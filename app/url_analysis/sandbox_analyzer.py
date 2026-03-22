@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
+import uuid
 from typing import Any
 from urllib.parse import urlparse
 
@@ -24,6 +26,8 @@ from app.url_analysis.fingerprint_beacon_analyzer import (
 
 DEFAULT_TIMEOUT_MS = 18_000
 MAX_NETWORK_LOGS = 500
+
+logger = logging.getLogger("zora.url_analysis.sandbox_analyzer")
 
 SUSPICIOUS_ENDPOINT_KEYWORDS: tuple[str, ...] = (
     "login",
@@ -113,6 +117,27 @@ def _is_suspicious_endpoint(url: str, method: str) -> bool:
     if lowered_method == "POST" and ("api" in lowered_url or "submit" in lowered_url):
         return True
     return False
+
+
+def _debug(run_id: str, message: str, level: str = "info") -> None:
+    """Emit both print and logger output for fast local debugging."""
+    line = f"[sandbox-debug][{run_id}] {message}"
+    print(line)
+
+    if level == "warning":
+        logger.warning(line)
+    elif level == "error":
+        logger.error(line)
+    else:
+        logger.info(line)
+
+
+def _loop_supports_subprocess(loop: asyncio.AbstractEventLoop) -> bool:
+    """Return whether current loop can spawn subprocesses (required by Playwright)."""
+    if sys.platform != "win32":
+        return True
+
+    return "ProactorEventLoop" in loop.__class__.__name__
 
 
 async def launch_browser() -> tuple[Any, Any]:
@@ -247,21 +272,32 @@ async def extract_cookies(context: Any, responses: list[Any]) -> tuple[list[str]
     return set_cookie_headers, cookies
 
 
-async def analyze_url(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[str, Any]:
-    """Analyze a URL in a hardened headless browser sandbox."""
+async def _analyze_url_impl(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[str, Any]:
+    """Internal analyzer implementation that executes Playwright sandbox flow."""
+    run_id = str(uuid.uuid4())[:8]
+    current_stage = "normalize_input"
+
     normalized_url = _normalize_input_url(url)
     output = _safe_output(normalized_url)
+    _debug(run_id, f"start analyze_url raw={url!r} normalized={normalized_url!r}")
 
     if not normalized_url:
         output["error"] = "empty_url"
+        _debug(run_id, "aborting: empty normalized URL", level="warning")
         return output
 
     try:
+        current_stage = "parse_initial_domain"
         parsed = urlparse(normalized_url)
         initial_host = (parsed.hostname or "").lower()
         initial_registered_domain = _registered_domain(initial_host)
+        _debug(
+            run_id,
+            f"initial_host={initial_host!r} initial_registered_domain={initial_registered_domain!r}",
+        )
     except Exception:
         output["error"] = "invalid_url"
+        _debug(run_id, "aborting: invalid URL after parsing", level="warning")
         return output
 
     playwright = None
@@ -270,15 +306,20 @@ async def analyze_url(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[st
     page = None
 
     try:
+        current_stage = "launch_browser"
         playwright, browser = await launch_browser()
+        _debug(run_id, "browser launched")
 
+        current_stage = "create_context"
         context = await browser.new_context(
             accept_downloads=False,
             ignore_https_errors=True,
             java_script_enabled=True,
         )
+        _debug(run_id, "browser context created")
 
         # Explicitly deny sensitive APIs in page runtime.
+        current_stage = "add_security_init_script"
         await context.add_init_script(
             """
             (() => {
@@ -296,31 +337,59 @@ async def analyze_url(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[st
             })();
             """
         )
-        await context.add_init_script(FINGERPRINT_BEACON_INIT_SCRIPT)
 
+        current_stage = "add_fingerprint_init_script"
+        await context.add_init_script(FINGERPRINT_BEACON_INIT_SCRIPT)
+        _debug(run_id, "init scripts injected")
+
+        current_stage = "create_page"
         page = await context.new_page()
         await page.set_viewport_size({"width": 1366, "height": 768})
         page.set_default_timeout(timeout_ms)
+        _debug(run_id, f"page ready timeout_ms={timeout_ms}")
 
+        current_stage = "attach_network_listeners"
         network_state = capture_network(page, initial_registered_domain)
+        _debug(run_id, "network listeners attached")
 
         try:
+            current_stage = "navigate"
+            _debug(run_id, f"navigating to {normalized_url}")
             await page.goto(normalized_url, wait_until="domcontentloaded", timeout=timeout_ms)
+
+            current_stage = "wait_networkidle"
             await page.wait_for_load_state("networkidle", timeout=min(timeout_ms, 7_000))
+            _debug(run_id, "navigation completed with networkidle")
         except Exception:
             # Continue with partial data for resilient output.
+            _debug(
+                run_id,
+                "navigation/load-state failed; continuing with partial telemetry",
+                level="warning",
+            )
             pass
 
+        current_stage = "extract_page_artifacts"
         final_url = page.url or normalized_url
         dom_length, raw_html = await extract_dom(page)
         num_scripts, external_js = await extract_scripts(page)
         set_cookie_headers, cookies = await extract_cookies(context, network_state["responses"])
+        _debug(
+            run_id,
+            (
+                f"final_url={final_url!r} dom_length={dom_length} scripts={num_scripts} "
+                f"network_requests={len(network_state['network_requests'])}"
+            ),
+        )
 
+        current_stage = "build_redirect_chain"
         redirect_chain: list[str] = []
         for nav_url in [normalized_url] + network_state["navigation_urls"] + [final_url]:
             if nav_url and nav_url not in redirect_chain:
                 redirect_chain.append(nav_url)
+        _debug(run_id, f"redirect_chain_length={len(redirect_chain)}")
 
+        current_stage = "analyze_phishing_behavior"
         phishing_behavior_analysis = await analyze_page_phishing_behavior(
             page=page,
             initial_url=normalized_url,
@@ -329,13 +398,23 @@ async def analyze_url(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[st
             responses=network_state["responses"],
             network_requests=network_state["network_requests"],
         )
+        _debug(
+            run_id,
+            f"phishing_behavior_keys={list(phishing_behavior_analysis.keys()) if isinstance(phishing_behavior_analysis, dict) else []}",
+        )
 
+        current_stage = "analyze_fingerprint_beacon"
         fingerprint_beacon_analysis = await analyze_page_fingerprint_and_beaconing(
             page=page,
             main_page_url=final_url,
             network_requests=network_state["network_requests"],
         )
+        _debug(
+            run_id,
+            f"fingerprint_beacon_keys={list(fingerprint_beacon_analysis.keys()) if isinstance(fingerprint_beacon_analysis, dict) else []}",
+        )
 
+        current_stage = "compose_output"
         output.update(
             {
                 "initial_url": normalized_url,
@@ -355,15 +434,29 @@ async def analyze_url(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[st
                 "error": "",
             }
         )
+        _debug(run_id, "analysis completed successfully")
         return output
 
     except ImportError:
         output["error"] = "playwright_not_installed"
+        _debug(run_id, "playwright is not installed", level="error")
         return output
     except Exception as exc:
-        output["error"] = _format_error(exc)
+        output["error"] = f"{_format_error(exc)}|stage={current_stage}|run_id={run_id}"
+        logger.exception(
+            "Sandbox analyze_url failed run_id=%s stage=%s normalized_url=%s",
+            run_id,
+            current_stage,
+            normalized_url,
+        )
+        _debug(
+            run_id,
+            f"failure stage={current_stage} exc={exc.__class__.__name__}: {exc}",
+            level="error",
+        )
         return output
     finally:
+        current_stage = "cleanup"
         if page is not None:
             try:
                 await page.close()
@@ -384,23 +477,54 @@ async def analyze_url(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[st
                 await playwright.stop()
             except Exception:
                 pass
+        _debug(run_id, "cleanup complete")
+
+
+async def analyze_url(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[str, Any]:
+    """Analyze a URL in a hardened headless browser sandbox."""
+    run_id = str(uuid.uuid4())[:8]
+
+    # On Windows, Playwright requires a loop with subprocess support (Proactor).
+    # Some ASGI loop configurations end up using SelectorEventLoop, which causes
+    # asyncio.create_subprocess_exec to raise NotImplementedError.
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if running_loop is not None and not _loop_supports_subprocess(running_loop):
+        _debug(
+            run_id,
+            (
+                "detected loop without subprocess support; "
+                "delegating sandbox execution to proactor thread"
+            ),
+            level="warning",
+        )
+        return await asyncio.to_thread(analyze_url_sync, url, timeout_ms)
+
+    return await _analyze_url_impl(url, timeout_ms)
 
 
 def analyze_url_sync(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[str, Any]:
     """Synchronous wrapper around async sandbox analyzer for non-async callers."""
     normalized_url = _normalize_input_url(url)
+    run_id = str(uuid.uuid4())[:8]
+    _debug(run_id, f"start analyze_url_sync normalized={normalized_url!r} timeout_ms={timeout_ms}")
 
     # Keep Windows policy explicit to avoid external overrides in long-lived apps.
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        _debug(run_id, "set WindowsProactorEventLoopPolicy")
 
     try:
         with asyncio.Runner() as runner:
-            return runner.run(analyze_url(normalized_url, timeout_ms=timeout_ms))
+            return runner.run(_analyze_url_impl(normalized_url, timeout_ms=timeout_ms))
     except RuntimeError:
         # If already in an event loop, do not crash the caller.
         result = _safe_output(normalized_url)
         result["error"] = "event_loop_running_use_async_api"
+        _debug(run_id, "runtime error: event loop already running", level="error")
         return result
 
 

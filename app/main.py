@@ -1,4 +1,6 @@
 import logging
+import asyncio
+import sys
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +10,10 @@ from app.auth.router import router as auth_router
 from app.text_analysis.router import router as text_analysis_router
 from app.url_analysis.router import router as url_analysis_router
 from app.middleware.auth_logging import AuthLoggingMiddleware
+
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 
 app = FastAPI()

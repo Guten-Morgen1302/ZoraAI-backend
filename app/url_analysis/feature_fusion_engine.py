@@ -71,7 +71,6 @@ class FeatureFusionEngine:
         "url_num_suspicious_keywords",
         "url_entropy",
         # DNS/WHOIS and infra features
-        "infra_domain_age_days",
         "infra_has_mx_records",
         "infra_num_a_records",
         "infra_fast_flux_detected",
@@ -113,7 +112,6 @@ class FeatureFusionEngine:
         "url_has_ip": (-1.0, 1.0),
         "url_num_suspicious_keywords": (-1.0, 12.0),
         "url_entropy": (-1.0, 8.0),
-        "infra_domain_age_days": (-1.0, 7300.0),
         "infra_has_mx_records": (-1.0, 1.0),
         "infra_num_a_records": (-1.0, 50.0),
         "infra_fast_flux_detected": (-1.0, 1.0),
@@ -155,7 +153,6 @@ class FeatureFusionEngine:
             "url_entropy",
         ),
         "infra": (
-            "infra_domain_age_days",
             "infra_has_mx_records",
             "infra_num_a_records",
             "infra_fast_flux_detected",
@@ -222,7 +219,6 @@ class FeatureFusionEngine:
             "url_has_ip": float(_safe_bool(url_features.get("has_ip"))),
             "url_num_suspicious_keywords": _safe_float(url_features.get("num_suspicious_keywords")),
             "url_entropy": _safe_float(url_features.get("entropy")),
-            "infra_domain_age_days": _safe_float(domain_features.get("domain_age_days")),
             "infra_has_mx_records": float(_safe_bool(domain_features.get("has_mx_records"))),
             "infra_num_a_records": _safe_float(domain_features.get("num_a_records")),
             "infra_fast_flux_detected": float(_safe_bool(domain_features.get("fast_flux_detected"))),

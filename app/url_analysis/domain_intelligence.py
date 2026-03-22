@@ -28,9 +28,6 @@ def _default_payload(domain: str = "") -> dict[str, Any]:
     """Return a safe default payload for extraction failures."""
     return {
         "domain": domain,
-        "domain_age_days": 0,
-        "domain_creation_date": "",
-        "domain_expiration_date": "",
         "registrar": "",
         "is_whois_private": False,
         "num_a_records": 0,
@@ -127,16 +124,6 @@ def _pick_expiration_date(value: Any) -> datetime | None:
     values = value if isinstance(value, list) else [value]
     parsed = [dt for dt in (_extract_datetime(item) for item in values) if dt is not None]
     return max(parsed) if parsed else None
-
-
-def _compute_domain_age_days(creation_dt: datetime | None) -> int:
-    """Compute non-negative domain age in days."""
-    if creation_dt is None:
-        return 0
-
-    now = datetime.now(timezone.utc)
-    delta = now - creation_dt
-    return max(delta.days, 0)
 
 
 def _fetch_whois_data(domain: str) -> dict[str, Any]:
@@ -263,9 +250,6 @@ def extract_domain_features(input_value: str) -> dict[str, Any]:
         return payload
 
     whois_data = _fetch_whois_data(domain)
-    creation_dt = whois_data.get("creation_dt")
-    expiration_dt = whois_data.get("expiration_dt")
-
     a_records, ttl_value = _resolve_a_records(domain)
     mx_records = _resolve_mx_records(domain)
     ns_records = _resolve_ns_records(domain)
@@ -276,9 +260,6 @@ def extract_domain_features(input_value: str) -> dict[str, Any]:
     payload.update(
         {
             "domain": domain,
-            "domain_age_days": _compute_domain_age_days(creation_dt),
-            "domain_creation_date": creation_dt.date().isoformat() if creation_dt else "",
-            "domain_expiration_date": expiration_dt.date().isoformat() if expiration_dt else "",
             "registrar": str(whois_data.get("registrar", "") or ""),
             "is_whois_private": bool(whois_data.get("is_private", False)),
             "num_a_records": len(a_records),
