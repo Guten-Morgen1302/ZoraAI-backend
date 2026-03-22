@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from app.static_analysis.classifier import predict
 
 # Replace with the path to your PDF
-file_path = "C:\\D\\SL\\Hacks\\ZoraAI\\ZoraAI-backend\\app\\attachment-sandbox\\tests\\God's plan bytecamp.pdf"
+file_path = "C:\\D\\SL\\Hacks\\ZoraAI\\ZoraAI-backend\\app\\attachment-sandbox\\tests\\python-3.12.5-amd64.exe"
 
 # Run the prediction
 probability, features = predict(file_path)
