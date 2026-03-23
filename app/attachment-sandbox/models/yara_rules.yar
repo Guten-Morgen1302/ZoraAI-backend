@@ -37,10 +37,23 @@ rule Embedded_IP_Address_Pattern
         description = "Detects raw IP addresses embedded in the binary. This is often used by loaders to fetch next-stage payloads or connect to C2s."
         severity = "Medium"
     strings:
-        // Generic IP pattern (heuristics only, might trigger FPs but useful with ML)
-        $ip_regex = /((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}/
+        // Strict dotted-quad IPv4 regex. Avoids matching arbitrary numeric blobs.
+        $ipv4 = /\b[0-9]{1,3}(\.[0-9]{1,3}){3}\b/
+        // Require transport/C2 context to reduce false positives in benign binaries.
+        $net1 = "http://" ascii wide nocase
+        $net2 = "https://" ascii wide nocase
+        $mal1 = "cmd.exe" ascii wide nocase
+        $mal2 = "powershell" ascii wide nocase
+        $mal3 = "wget " ascii wide nocase
+        $mal4 = "curl " ascii wide nocase
+        $mal5 = "/gate.php" ascii wide nocase
+        $mal6 = "/panel" ascii wide nocase
+        $mal7 = "/update.exe" ascii wide nocase
+        // Common benign literals that should not independently trigger this heuristic.
+        $benign1 = "127.0.0.1" ascii wide
+        $benign2 = "localhost" ascii wide nocase
     condition:
-        $ip_regex
+        $ipv4 and any of ($net*) and any of ($mal*) and not any of ($benign*)
 }
 
 rule Generic_Ransomware_Notes
