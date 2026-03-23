@@ -12,6 +12,7 @@ from app.url_analysis.router import router as url_analysis_router
 from app.attachment.router import router as attachment_router
 from app.voice_analysis.router import router as voice_analysis_router
 from app.middleware.auth_logging import AuthLoggingMiddleware
+from app.ai_security.middleware import ShadowGuardMiddleware
 
 
 if sys.platform == "win32":
@@ -35,6 +36,7 @@ logging.basicConfig(
 )
 
 app.add_middleware(AuthLoggingMiddleware)
+app.add_middleware(ShadowGuardMiddleware)
 
 Base.metadata.create_all(bind=engine)
 
