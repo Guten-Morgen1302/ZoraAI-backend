@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from threading import Lock
 from typing import Any
 
 from app.fraud_memory.embedding_service import FraudMemoryEmbeddingService, get_embedding_service
 from app.text_analysis.preprocessing import validate_sms_text_quality
+
+
+logger = logging.getLogger("zora.text_analysis.sms_similarity")
 
 
 @dataclass
@@ -69,8 +73,22 @@ def _get_sms_similarity_service() -> SMSVectorSimilarityService:
 
 def find_similar_sms_messages(text: str, top_k: int = 5, threshold: float = 0.85) -> dict[str, Any]:
     """Public helper used by the API layer for SMS similarity lookups in Qdrant."""
-    service = _get_sms_similarity_service()
-    result = service.find_similar_messages(text=text, top_k=top_k, threshold=threshold)
+    try:
+        service = _get_sms_similarity_service()
+        result = service.find_similar_messages(text=text, top_k=top_k, threshold=threshold)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("SMS vector similarity unavailable; returning safe fallback: %s", exc)
+        result = SMSVectorSimilarityResult(
+            similarity_score=0.0,
+            matched_label=None,
+            high_risk=False,
+            threshold=threshold,
+            top_k=top_k,
+            matched_text=None,
+            matched_source=None,
+            top_k_matches=[],
+        )
+
     return {
         "similarity_score": result.similarity_score,
         "matched_label": result.matched_label,

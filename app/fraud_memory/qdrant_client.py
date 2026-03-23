@@ -19,6 +19,16 @@ DEFAULT_COLLECTION_NAME = "fraud_vectors"
 DEFAULT_VECTOR_SIZE = 384
 
 
+def _normalize_qdrant_url(raw_url: str | None) -> str:
+    """Normalize URL input from env vars to avoid malformed host parsing."""
+    url = (raw_url or "").strip().strip('"').strip("'").rstrip("/")
+    if not url:
+        return DEFAULT_QDRANT_URL
+    if "http://" not in url and "https://" not in url:
+        return f"https://{url}"
+    return url
+
+
 class QdrantVectorStore:
     """Wrapper around Qdrant operations used by the fraud memory service."""
 
@@ -117,15 +127,35 @@ def build_qdrant_client():
             "qdrant-client is required for Fraud Memory Service. Install it with 'pip install qdrant-client'."
         ) from exc
 
-    url = os.getenv("QDRANT_URL") or os.getenv("QDRANT_CONNECTION_URL") or DEFAULT_QDRANT_URL
+    url = _normalize_qdrant_url(os.getenv("QDRANT_URL") or os.getenv("QDRANT_CONNECTION_URL"))
     api_key = os.getenv("QDRANT_API_KEY", DEFAULT_QDRANT_API_KEY)
 
-    if api_key == DEFAULT_QDRANT_API_KEY:
-        logger.warning("QDRANT_API_KEY is set to placeholder value; replace it for production use")
+    if not api_key:
+        logger.warning("QDRANT_API_KEY is not set; authenticated Qdrant cloud requests may fail")
 
     return QdrantClient(url=url, api_key=api_key)
 
 
+def _build_in_memory_qdrant_store() -> QdrantVectorStore:
+    """Fallback store used when remote Qdrant is unreachable."""
+    try:
+        from qdrant_client import QdrantClient
+    except ImportError as exc:
+        raise RuntimeError(
+            "qdrant-client is required for Fraud Memory Service. Install it with 'pip install qdrant-client'."
+        ) from exc
+
+    local_client = QdrantClient(path=":memory:")
+    return QdrantVectorStore(client=local_client)
+
+
 def get_qdrant_vector_store() -> QdrantVectorStore:
     client = build_qdrant_client()
-    return QdrantVectorStore(client=client)
+    try:
+        return QdrantVectorStore(client=client)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Remote Qdrant is unreachable. Falling back to in-memory vector store for this process: %s",
+            exc,
+        )
+        return _build_in_memory_qdrant_store()

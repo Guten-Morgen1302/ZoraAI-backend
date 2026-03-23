@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from threading import Lock
 from typing import Any
 
 from app.fraud_memory.embedding_service import FraudMemoryEmbeddingService, get_embedding_service
+
+
+logger = logging.getLogger("zora.text_analysis.email_similarity")
 
 
 @dataclass
@@ -69,8 +73,22 @@ def _get_email_similarity_service() -> EmailVectorSimilarityService:
 
 def find_similar_email_messages(text: str, top_k: int = 5, threshold: float = 0.85) -> dict[str, Any]:
     """Public helper used by API layer for email similarity lookups in Qdrant."""
-    service = _get_email_similarity_service()
-    result = service.find_similar_messages(text=text, top_k=top_k, threshold=threshold)
+    try:
+        service = _get_email_similarity_service()
+        result = service.find_similar_messages(text=text, top_k=top_k, threshold=threshold)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Email vector similarity unavailable; returning safe fallback: %s", exc)
+        result = EmailVectorSimilarityResult(
+            similarity_score=0.0,
+            matched_label=None,
+            high_risk=False,
+            threshold=threshold,
+            top_k=top_k,
+            matched_text=None,
+            matched_source=None,
+            top_k_matches=[],
+        )
+
     return {
         "similarity_score": result.similarity_score,
         "matched_label": result.matched_label,

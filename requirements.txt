@@ -118,3 +118,9 @@ uvicorn
 wasabi
 weasel
 wrapt
+python-multipart
+win_unicode_console
+yara-python
+librosa
+soundfile
+faster-whisper
