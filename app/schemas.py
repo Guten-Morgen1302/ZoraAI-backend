@@ -111,3 +111,88 @@ class SMSFraudFeedbackResponse(BaseModel):
 	request_id: UUID | None = None
 	vector_id: str
 	status: str
+
+
+class LatestEmailFetchRequest(BaseModel):
+	query: str | None = Field(default=None, max_length=500)
+
+
+class LatestEmailFetchResponse(BaseModel):
+	message_id: str
+	thread_id: str | None = None
+	sender: str
+	subject: str
+	body: str
+	preprocessing: dict[str, Any]
+
+
+class LatestEmailAnalyzeRequest(BaseModel):
+	query: str | None = Field(default=None, max_length=500)
+	force_reauth: bool = True
+	with_llm_explanation: bool = False
+
+
+class EmailAnalyzeByIdRequest(BaseModel):
+	thread_id: str = Field(min_length=1, max_length=256)
+	message_id: str = Field(min_length=1, max_length=256)
+	force_reauth: bool = False
+	with_llm_explanation: bool = False
+
+
+class EmailAnalyzeManualRequest(BaseModel):
+	sender: str = Field(min_length=1, max_length=512)
+	subject: str = Field(default="", max_length=1000)
+	body: str = Field(min_length=1, max_length=100000)
+	with_llm_explanation: bool = False
+
+
+class LatestEmailAnalyzeResponse(BaseModel):
+	message_id: str
+	thread_id: str | None = None
+	sender: str
+	subject: str
+	body: str
+	risk_score: float
+	nlp_score: float
+	similarity_score: float
+	stylometry_score: float
+	confidence: float
+	fraud_type: str
+	nlp_prediction: dict[str, Any]
+	similarity: dict[str, Any]
+	llm_enhanced: bool
+	llm_explanation: str | None = None
+	llm_label: str | None = None
+	llm_confidence: float | None = None
+
+
+class URLAnalyzeRequest(BaseModel):
+	url: str = Field(min_length=4, max_length=4096)
+	with_llm_explanation: bool = True
+
+
+class URLAnalyzeResponse(BaseModel):
+	request_id: UUID | None = None
+	url: str
+	phishing_probability: float
+	risk_score: float
+	risk_level: str
+	model: str
+	persisted: bool = False
+	pipeline_checks: dict[str, Any]
+	risk_components: dict[str, float]
+	llm_enhanced: bool
+	llm_label: str | None = None
+	llm_confidence: float | None = None
+	llm_explanation: str | None = None
+	llm_key_indicators: list[str] = Field(default_factory=list)
+	llm_recommendations: list[str] = Field(default_factory=list)
+	url_features: dict[str, Any]
+	domain_features: dict[str, Any]
+	tls_features: dict[str, Any]
+	homoglyph_features: dict[str, Any]
+	sandbox_features: dict[str, Any]
+	cookie_features: dict[str, Any]
+	phishing_behavior_features: dict[str, Any]
+	fingerprint_beacon_features: dict[str, Any]
+	fused_features: dict[str, Any]

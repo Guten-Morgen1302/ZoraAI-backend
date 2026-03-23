@@ -6,7 +6,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.models import ConfirmedFraudCase, PhishingAnalysis, PhishingRequest, SmsThreatResult
+from app.models import ConfirmedFraudCase, EmailThreatResult, PhishingAnalysis, PhishingRequest, SmsThreatResult
 
 
 class PhishingRepository:
@@ -55,6 +55,23 @@ class PhishingRepository:
         self.db.add(sms_result)
         self.db.flush()
         return sms_result
+
+    def create_email_threat_result(
+        self,
+        request_id,
+        result: str,
+        prediction: str,
+        explanation: str,
+    ) -> EmailThreatResult:
+        email_result = EmailThreatResult(
+            request_id=request_id,
+            result=result,
+            prediction=prediction,
+            explanation=explanation,
+        )
+        self.db.add(email_result)
+        self.db.flush()
+        return email_result
 
     def create_confirmed_fraud_case(
         self,
