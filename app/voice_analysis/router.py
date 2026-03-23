@@ -4,14 +4,16 @@ import numpy as np
 import io
 import asyncio
 import json
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import FastAPI, UploadFile, File
+from fastapi import APIRouter, UploadFile, File
 
 # Custom modules
-from src.transcription import get_transcript
-from src.fraud_analyzer import analyze_fraud_intent  
-from src.voice_model import ResNetBiLSTM 
-app = FastAPI()
+from app.voice_analysis.src.transcription import get_transcript
+from app.voice_analysis.src.fraud_analyzer import analyze_fraud_intent
+from app.voice_analysis.src.voice_model import ResNetBiLSTM
+
+router = APIRouter(prefix="/voice", tags=["voice-analysis"])
 executor = ThreadPoolExecutor(max_workers=3)
 
 # --- CONFIG ---
@@ -21,10 +23,10 @@ N_MFCC = 40
 MAX_LEN = 300
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+MODEL_PATH = Path(__file__).resolve().parent / "models" / "model.pth"
 
 model = ResNetBiLSTM().to(device)
-
-model.load_state_dict(torch.load("models/model.pth", map_location=device))
+model.load_state_dict(torch.load(str(MODEL_PATH), map_location=device))
 model.eval()
 
 
@@ -99,7 +101,7 @@ def run_voice_model_logic(audio_bytes):
     }
 
 # Main Endpoint
-@app.post("/voice/analyse")
+@router.post("/analyse")
 async def detect_fraud(file: UploadFile = File(...)):
     audio_bytes = await file.read()
     loop = asyncio.get_event_loop()
@@ -130,7 +132,3 @@ async def detect_fraud(file: UploadFile = File(...)):
         "transcript": transcript_text,
         "fraud_report": fraud_report 
     }
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)

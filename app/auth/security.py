@@ -3,8 +3,8 @@ from datetime import datetime, timedelta
 from typing import Any, Dict
 
 import jwt
+import bcrypt
 from dotenv import load_dotenv
-from passlib.context import CryptContext
 import hashlib
 
 load_dotenv()
@@ -14,17 +14,15 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_DAYS = 3
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(password: str) -> str:
     password = hashlib.sha256(password.encode()).hexdigest()
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(password: str, password_hash: str) -> bool:
     password = hashlib.sha256(password.encode()).hexdigest()
-    return pwd_context.verify(password, password_hash)
+    return bcrypt.checkpw(password.encode(), password_hash.encode())
 
 
 def _create_token(subject: str, token_type: str, expires_delta: timedelta) -> str:
