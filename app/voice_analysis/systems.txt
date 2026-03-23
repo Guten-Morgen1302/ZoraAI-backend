@@ -1,0 +1,31 @@
+Installation and Setups
+
+1. Install from pip -- librosa numpy pandas soundfile
+2. Install Windows Softwares -- ffmpeg, ollama, pull ollama 3.2
+3. Install from pip -- pip install faster-whisper, pip install ollama
+4. Run check_setup.py
+
+
+System Overview
+
+The system is a multimodal fraud detection pipeline that performs simultaneous acoustic and linguistic 
+analysis of audio input. The core of the voice analysis engine utilizes a ResNet-BiLSTM architecture. 
+The process begins with the extraction of 3-channel MFCC features, comprising static coefficients, delta, 
+and delta-delta transitions. These features are standardized to a fixed 300-frame temporal length to 
+eliminate duration-based classification bias.
+
+The feature maps are processed by a Residual Network (ResNet) backbone, which utilizes skip connections 
+and convolutional layers to identify fine-grained spectral textures and synthetic artifacts indicative 
+of vocoder-generated speech. The resulting spatial feature maps are flattened and passed to a Bidirectional
+Long Short-Term Memory (BiLSTM) network. The BiLSTM analyzes the sequential dependencies of the audio in 
+both forward and backward temporal directions, capturing unnatural speech flow or robotic prosody common 
+in modern text-to-speech engines like ElevenLabs.
+
+To ensure high-speed processing, the system executes the audio classification and the transcription model 
+in parallel using an asynchronous thread pool executor. While the ResNet-BiLSTM evaluates the physical 
+properties of the sound, a separate transcription engine generates a text-based representation of the 
+dialogue. Both outputs—the acoustic spoof probability and the raw transcript—are then fed into a fraud 
+analyzer. This final stage uses large language model logic to cross-reference the intent of the text with 
+the authenticity of the voice. This dual-verification approach allows the system to prioritize 
+intent-based risk scores when the acoustic model produces a high-confidence "Real" result for sophisticated 
+deepfakes that lack detectable synthetic signatures
