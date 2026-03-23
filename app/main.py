@@ -10,6 +10,7 @@ from app.auth.router import router as auth_router
 from app.text_analysis.router import router as text_analysis_router
 from app.url_analysis.router import router as url_analysis_router
 from app.attachment.router import router as attachment_router
+from app.voice_analysis.router import router as voice_analysis_router
 from app.middleware.auth_logging import AuthLoggingMiddleware
 
 
@@ -41,6 +42,7 @@ app.include_router(auth_router)
 app.include_router(text_analysis_router)
 app.include_router(url_analysis_router)
 app.include_router(attachment_router)
+app.include_router(voice_analysis_router)
 
 @app.get("/")
 def home():
