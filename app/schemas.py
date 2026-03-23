@@ -196,3 +196,18 @@ class URLAnalyzeResponse(BaseModel):
 	phishing_behavior_features: dict[str, Any]
 	fingerprint_beacon_features: dict[str, Any]
 	fused_features: dict[str, Any]
+
+
+class AttachmentEngineResult(BaseModel):
+	is_flagged: bool
+	hits: list[str] | None = None
+	signature: str | None = None
+	score: float | None = None
+
+
+class AttachmentAnalyzeResponse(BaseModel):
+	filename: str
+	file_size: int
+	final_verdict: str
+	engines: dict[str, AttachmentEngineResult]
+	features: dict[str, Any]
