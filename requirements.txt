@@ -76,7 +76,6 @@ pyparsing
 python-dateutil
 python-dotenv
 PyYAML
-qdrant-client
 redis
 regex
 requests
@@ -125,3 +124,4 @@ librosa
 soundfile
 faster-whisper
 boto3
+Pinecone

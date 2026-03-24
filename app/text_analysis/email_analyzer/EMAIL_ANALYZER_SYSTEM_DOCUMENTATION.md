@@ -178,7 +178,7 @@ train_stylometry_model supports dataset path overrides and persists model artifa
 
 ## 8. Vector Memory Similarity Layer
 
-The similarity layer is implemented in similarity.py using the shared fraud memory embedding service.
+The similarity layer is implemented in similarity.py using the shared fraud memory embedding service backed by Pinecone.
 
 ### 8.1 Search Behavior
 
