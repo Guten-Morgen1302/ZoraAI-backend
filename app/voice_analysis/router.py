@@ -4,17 +4,24 @@ import numpy as np
 import io
 import asyncio
 import json
+import logging
+import uuid
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from sqlalchemy.orm import Session
 
 # Custom modules
+from app.database import get_db
+from app.models import VoiceAnalysis, VoiceRequest
+from app.schemas import VoiceAnalysisResponse
 from app.voice_analysis.src.transcription import get_transcript
 from app.voice_analysis.src.fraud_analyzer import analyze_fraud_intent
 from app.voice_analysis.src.voice_model import ResNetBiLSTM
 
 router = APIRouter(prefix="/voice", tags=["voice-analysis"])
 executor = ThreadPoolExecutor(max_workers=3)
+logger = logging.getLogger("zora.voice_analysis")
 
 # --- CONFIG ---
 SR = 16000
@@ -101,34 +108,119 @@ def run_voice_model_logic(audio_bytes):
     }
 
 # Main Endpoint
-@router.post("/analyse")
-async def detect_fraud(file: UploadFile = File(...)):
+@router.post("/analyse", response_model=VoiceAnalysisResponse, status_code=status.HTTP_200_OK)
+async def detect_fraud(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    print("[voice-debug] /voice/analyse request received")
+    logger.info("Voice analysis request received", extra={"upload_filename": file.filename})
+
     audio_bytes = await file.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
+
     loop = asyncio.get_event_loop()
-    
+
     voice_task = loop.run_in_executor(executor, run_voice_model_logic, audio_bytes)
     transcript_task = loop.run_in_executor(executor, get_transcript, io.BytesIO(audio_bytes))
-    
+
     voice_res, transcript_text = await asyncio.gather(voice_task, transcript_task)
-    
+
+    user_id_value = getattr(request.state, "user_id", None)
+    user_id = None
+    if user_id_value:
+        try:
+            user_id = uuid.UUID(str(user_id_value))
+        except ValueError:
+            logger.warning("Invalid user_id in request state, storing as null", extra={"user_id": user_id_value})
+
+    voice_request = VoiceRequest(
+        user_id=user_id,
+        filename=file.filename or "uploaded_audio",
+        mime_type=file.content_type,
+        file_size=len(audio_bytes),
+        transcript=transcript_text or "",
+        status="transcribed",
+    )
+    db.add(voice_request)
+    db.commit()
+    db.refresh(voice_request)
+
+    print(f"[voice-debug] Transcription persisted request_id={voice_request.id}")
+    logger.info(
+        "Voice transcription persisted",
+        extra={"request_id": str(voice_request.id), "transcript_length": len(transcript_text or "")},
+    )
+
     if "error" in voice_res:
-        return voice_res
+        failure_detail = str(voice_res.get("error") or "Voice model inference failed")
+        analysis_row = VoiceAnalysis(
+            request_id=voice_request.id,
+            voice_result=json.dumps(voice_res, default=str),
+            fraud_report=json.dumps({"error": failure_detail}),
+            status="failed",
+            error_message=failure_detail,
+        )
+        voice_request.status = "failed"
+        db.add(analysis_row)
+        db.commit()
+
+        logger.error("Voice model failed", extra={"request_id": str(voice_request.id), "detail": failure_detail})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=failure_detail)
 
     # Fraud Analysis via LLM
-    llm_output_raw = analyze_fraud_intent(
-        transcript_text, 
-        voice_res['result'], 
-        voice_res['confidence']
-    )
-    
     try:
-        fraud_report = json.loads(llm_output_raw)
-    except:
-        fraud_report = {"error": "JSON parsing failed", "raw": llm_output_raw}
+        llm_output_raw = analyze_fraud_intent(
+            transcript_text,
+            voice_res["result"],
+            voice_res["confidence"],
+        )
 
-    return {
-        "filename": file.filename,
-        "voice_analysis": voice_res,
-        "transcript": transcript_text,
-        "fraud_report": fraud_report 
-    }
+        try:
+            fraud_report = json.loads(llm_output_raw)
+        except Exception:  # noqa: BLE001
+            fraud_report = {"error": "JSON parsing failed", "raw": llm_output_raw}
+    except Exception as exc:  # noqa: BLE001
+        failure_detail = f"Fraud intent analysis failed: {exc}"
+        analysis_row = VoiceAnalysis(
+            request_id=voice_request.id,
+            voice_result=json.dumps(voice_res, default=str),
+            fraud_report=json.dumps({"error": failure_detail}),
+            status="failed",
+            error_message=failure_detail,
+        )
+        voice_request.status = "failed"
+        db.add(analysis_row)
+        db.commit()
+
+        logger.error(
+            "Voice fraud analysis failed",
+            extra={"request_id": str(voice_request.id), "detail": failure_detail},
+        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=failure_detail) from exc
+
+    analysis_row = VoiceAnalysis(
+        request_id=voice_request.id,
+        voice_result=json.dumps(voice_res, default=str),
+        fraud_report=json.dumps(fraud_report, default=str),
+        status="completed",
+        error_message=None,
+    )
+    voice_request.status = "completed"
+    db.add(analysis_row)
+    db.commit()
+    db.refresh(analysis_row)
+
+    print(f"[voice-debug] Analysis persisted analysis_id={analysis_row.id}")
+    logger.info(
+        "Voice analysis completed and persisted",
+        extra={"request_id": str(voice_request.id), "analysis_id": str(analysis_row.id)},
+    )
+
+    return VoiceAnalysisResponse(
+        request_id=voice_request.id,
+        analysis_id=analysis_row.id,
+        status=analysis_row.status,
+        filename=file.filename or "uploaded_audio",
+        voice_analysis=voice_res,
+        transcript=transcript_text,
+        fraud_report=fraud_report,
+    )
