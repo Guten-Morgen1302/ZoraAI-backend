@@ -1,81 +1,25 @@
 from __future__ import annotations
 
 import importlib
-import json
-import logging
 import os
 import sys
 import tempfile
-import uuid
 from pathlib import Path
 from typing import Any
 
-import boto3
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
-from app.database import get_db
-from app.models import AttachmentAnalysis, AttachmentRequest
 from app.schemas import AttachmentAnalyzeResponse, AttachmentEngineResult
+from app.attachment_sandbox.llm_reasoner import explain_attachment_with_llm
 
 router = APIRouter(prefix="/attachment", tags=["attachment-analysis"])
-logger = logging.getLogger("zora.attachment")
 
-
-def _resolve_sandbox_root() -> Path:
-    base_dir = Path(__file__).resolve().parent
-    candidates = [
-        base_dir,
-        base_dir.parent / "attachment-sandbox",
-    ]
-    for candidate in candidates:
-        if (candidate / "app" / "static_analysis" / "pipeline.py").exists():
-            return candidate
-    return base_dir
-
-
-_SANDBOX_ROOT = _resolve_sandbox_root()
-
-DEFAULT_S3_REGION = os.getenv("AWS_REGION", "ap-south-1")
-DEFAULT_S3_BUCKET = os.getenv("AWS_S3_BUCKET_NAME") or os.getenv("S3_BUCKET_NAME") or "zora-ai-dev-bucket"
-
-
-def _build_s3_client():
-    access_key = os.getenv("AWS_ACCESS_KEY_ID")
-    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-    region = os.getenv("AWS_REGION", DEFAULT_S3_REGION)
-
-    if not access_key or not secret_key:
-        raise RuntimeError("AWS credentials are missing. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.")
-
-    return boto3.client(
-        "s3",
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        region_name=region,
-    )
-
-
-def _upload_to_s3(local_path: str, original_filename: str) -> str:
-    bucket = DEFAULT_S3_BUCKET
-    if not bucket:
-        raise RuntimeError("S3 bucket is not configured. Set AWS_S3_BUCKET_NAME or S3_BUCKET_NAME.")
-
-    safe_name = os.path.basename(original_filename or "uploaded_attachment")
-    object_key = f"attachment/{uuid.uuid4()}_{safe_name}"
-    region = os.getenv("AWS_REGION", DEFAULT_S3_REGION)
-
-    s3_client = _build_s3_client()
-    s3_client.upload_file(local_path, bucket, object_key)
-
-    return f"https://{bucket}.s3.{region}.amazonaws.com/{object_key}"
-
+_SANDBOX_ROOT = Path(__file__).resolve().parent
 
 def _ensure_sandbox_path() -> None:
     sandbox_root_str = str(_SANDBOX_ROOT)
     if sandbox_root_str not in sys.path:
         sys.path.insert(0, sandbox_root_str)
-
 
 def _load_pipeline_runner():
     _ensure_sandbox_path()
@@ -110,109 +54,10 @@ def _normalize_engine_results(engines: Any) -> dict[str, AttachmentEngineResult]
     return result
 
 
-def _safe_json_loads(raw: str | None) -> dict[str, Any]:
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-        return parsed if isinstance(parsed, dict) else {}
-    except Exception:  # noqa: BLE001
-        return {}
-
-
-def _safe_user_uuid(request: Request) -> uuid.UUID | None:
-    state_user = request.state.user_id if hasattr(request.state, "user_id") else None
-    if state_user is None:
-        return None
-    if isinstance(state_user, uuid.UUID):
-        return state_user
-    try:
-        return uuid.UUID(str(state_user))
-    except (ValueError, TypeError):
-        return None
-
-
-@router.get("/history", status_code=status.HTTP_200_OK)
-def get_attachment_history(request: Request, db: Session = Depends(get_db)):
-    user_id = _safe_user_uuid(request)
-
-    query = (
-        db.query(AttachmentRequest, AttachmentAnalysis)
-        .outerjoin(AttachmentAnalysis, AttachmentAnalysis.request_id == AttachmentRequest.id)
-    )
-    if user_id is not None:
-        query = query.filter(AttachmentRequest.user_id == user_id)
-
-    rows = query.order_by(AttachmentRequest.created_at.desc()).limit(20).all()
-
-    history: list[dict[str, Any]] = []
-    for req_row, analysis_row in rows:
-        final_verdict = None
-        flagged_engines = 0
-        if analysis_row and analysis_row.engines:
-            parsed_engines = _safe_json_loads(analysis_row.engines)
-            final_verdict = analysis_row.final_verdict
-            for payload in parsed_engines.values():
-                if isinstance(payload, dict) and bool(payload.get("is_flagged")):
-                    flagged_engines += 1
-
-        history.append(
-            {
-                "request_id": str(req_row.id),
-                "filename": req_row.filename,
-                "file_size": req_row.file_size,
-                "created_at": req_row.created_at.isoformat() if req_row.created_at else None,
-                "status": req_row.status,
-                "final_verdict": final_verdict,
-                "flagged_engines": flagged_engines,
-            }
-        )
-    return history
-
-
-@router.get("/history/{request_id}", response_model=AttachmentAnalyzeResponse, status_code=status.HTTP_200_OK)
-def get_attachment_history_detail(request_id: str, request: Request, db: Session = Depends(get_db)):
-    user_id = _safe_user_uuid(request)
-
-    try:
-        request_uuid = uuid.UUID(request_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request_id") from exc
-
-    query = (
-        db.query(AttachmentRequest, AttachmentAnalysis)
-        .join(AttachmentAnalysis, AttachmentAnalysis.request_id == AttachmentRequest.id)
-        .filter(AttachmentRequest.id == request_uuid)
-    )
-    if user_id is not None:
-        query = query.filter(AttachmentRequest.user_id == user_id)
-
-    row = query.first()
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment analysis not found")
-
-    req_row, analysis_row = row
-    parsed_engines = _safe_json_loads(analysis_row.engines)
-    parsed_features = _safe_json_loads(analysis_row.features)
-
-    return AttachmentAnalyzeResponse(
-        request_id=req_row.id,
-        analysis_id=analysis_row.id,
-        filename=req_row.filename,
-        file_size=req_row.file_size,
-        s3_url=req_row.s3_url,
-        status=analysis_row.status,
-        final_verdict=analysis_row.final_verdict,
-        engines=_normalize_engine_results(parsed_engines),
-        features=parsed_features,
-    )
-
-
 @router.post("/analyze", response_model=AttachmentAnalyzeResponse, status_code=status.HTTP_200_OK)
 async def analyze_attachment(
-    request: Request,
     file: UploadFile | None = File(default=None),
-    db: Session = Depends(get_db),
+    with_llm_explanation: str = Form("false"),
 ):
     if file is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file uploaded")
@@ -223,10 +68,6 @@ async def analyze_attachment(
 
     suffix = Path(filename).suffix
     temp_file_path: str | None = None
-    attachment_request_row: AttachmentRequest | None = None
-
-    print("[attachment-debug] /attachment/analyze request received")
-    logger.info("Attachment analysis request received", extra={"upload_filename": filename})
 
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -239,99 +80,38 @@ async def analyze_attachment(
             tmp.write(content)
             temp_file_path = tmp.name
 
-        s3_url = _upload_to_s3(temp_file_path, filename)
-
-        user_id_value = getattr(request.state, "user_id", None)
-        user_id = None
-        if user_id_value:
-            try:
-                user_id = uuid.UUID(str(user_id_value))
-            except ValueError:
-                logger.warning("Invalid user_id in request state, storing as null", extra={"user_id": user_id_value})
-
-        attachment_request_row = AttachmentRequest(
-            user_id=user_id,
-            filename=filename,
-            mime_type=file.content_type,
-            file_size=len(content),
-            s3_url=s3_url,
-            status="uploaded",
-        )
-        db.add(attachment_request_row)
-        db.commit()
-        db.refresh(attachment_request_row)
-
-        print(f"[attachment-debug] Request persisted request_id={attachment_request_row.id}")
-        logger.info(
-            "Attachment request persisted",
-            extra={"request_id": str(attachment_request_row.id), "s3_url": s3_url},
-        )
-
         run_static_pipeline = _load_pipeline_runner()
         report = run_static_pipeline(temp_file_path)
 
         if not isinstance(report, dict):
             raise RuntimeError("Attachment pipeline returned an invalid response")
 
-        analysis_row = AttachmentAnalysis(
-            request_id=attachment_request_row.id,
-            final_verdict=str(report.get("final_verdict") or "unknown"),
-            engines=json.dumps(report.get("engines") if isinstance(report.get("engines"), dict) else {}, default=str),
-            features=json.dumps(report.get("features") if isinstance(report.get("features"), dict) else {}, default=str),
-            status="completed",
-            error_message=None,
-        )
-        attachment_request_row.status = "completed"
-        db.add(analysis_row)
-        db.commit()
-        db.refresh(analysis_row)
+        response_kwargs = {
+            "filename": filename,
+            "file_size": len(content),
+            "final_verdict": str(report.get("final_verdict") or "unknown"),
+            "engines": _normalize_engine_results(report.get("engines")),
+            "features": report.get("features") if isinstance(report.get("features"), dict) else {},
+        }
 
-        print(f"[attachment-debug] Analysis persisted analysis_id={analysis_row.id}")
-        logger.info(
-            "Attachment analysis completed and persisted",
-            extra={"request_id": str(attachment_request_row.id), "analysis_id": str(analysis_row.id)},
-        )
+        is_llm_requested = with_llm_explanation.strip().lower() in ("true", "1", "yes", "y", "on")
+        if is_llm_requested:
+            llm_result = explain_attachment_with_llm(report, filename)
+            response_kwargs.update({
+                "llm_enhanced": True,
+                "llm_label": llm_result.get("final_label"),
+                "llm_confidence": llm_result.get("confidence"),
+                "llm_explanation": llm_result.get("explanation"),
+                "llm_key_indicators": llm_result.get("key_indicators", []),
+                "llm_recommendations": llm_result.get("recommendations", []),
+            })
 
-        return AttachmentAnalyzeResponse(
-            request_id=attachment_request_row.id,
-            analysis_id=analysis_row.id,
-            filename=filename,
-            file_size=len(content),
-            s3_url=s3_url,
-            status="completed",
-            final_verdict=str(report.get("final_verdict") or "unknown"),
-            engines=_normalize_engine_results(report.get("engines")),
-            features=report.get("features") if isinstance(report.get("features"), dict) else {},
-        )
+        return AttachmentAnalyzeResponse(**response_kwargs)
     except HTTPException:
         raise
     except RuntimeError as exc:
-        if attachment_request_row is not None:
-            analysis_row = AttachmentAnalysis(
-                request_id=attachment_request_row.id,
-                final_verdict="unknown",
-                engines=json.dumps({}, default=str),
-                features=json.dumps({}, default=str),
-                status="failed",
-                error_message=str(exc),
-            )
-            attachment_request_row.status = "failed"
-            db.add(analysis_row)
-            db.commit()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
-        if attachment_request_row is not None:
-            analysis_row = AttachmentAnalysis(
-                request_id=attachment_request_row.id,
-                final_verdict="unknown",
-                engines=json.dumps({}, default=str),
-                features=json.dumps({}, default=str),
-                status="failed",
-                error_message=str(exc),
-            )
-            attachment_request_row.status = "failed"
-            db.add(analysis_row)
-            db.commit()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Attachment analysis failed: {exc}",
