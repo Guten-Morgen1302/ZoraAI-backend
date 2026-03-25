@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -43,12 +45,98 @@ from app.text_analysis.service import (
     SMSFraudAnalysisService,
     TextAnalysisService,
 )
+from app.auth.security import get_token_subject
 from app.models import SmsThreatResult, EmailThreatResult, PhishingRequest as PhishingRequestModel
 
 router = APIRouter(prefix="/text", tags=["text-analysis"])
 GMAIL_CLIENT_SECRETS_FILE = Path(__file__).resolve().parent / "email_analyzer" / "gmail_client_secrets.json"
 EMAIL_SIMILARITY_TOP_K = 3
 EMAIL_SIMILARITY_THRESHOLD = 0.85
+
+
+def _safe_json_loads(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _normalize_sms_history_payload(req: PhishingRequestModel, threat: SmsThreatResult) -> SMSAnalyzeResponse:
+    parsed_result = _safe_json_loads(threat.result)
+    parsed_prediction = _safe_json_loads(threat.prediction)
+    parsed_similarity = parsed_result.get("similarity") if isinstance(parsed_result.get("similarity"), dict) else {}
+
+    similarity_payload = {
+        "similarity_score": float(parsed_similarity.get("similarity_score") or 0.0),
+        "matched_label": parsed_similarity.get("matched_label"),
+        "high_risk": bool(parsed_similarity.get("high_risk")),
+        "threshold": float(parsed_similarity.get("threshold") or DEFAULT_SIMILARITY_THRESHOLD),
+        "top_k": int(parsed_similarity.get("top_k") or DEFAULT_SIMILARITY_TOP_K),
+        "matched_text": parsed_similarity.get("matched_text"),
+        "matched_source": parsed_similarity.get("matched_source"),
+        "top_k_matches": parsed_similarity.get("top_k_matches") if isinstance(parsed_similarity.get("top_k_matches"), list) else [],
+    }
+
+    return SMSAnalyzeResponse(
+        request_id=req.id,
+        risk_score=float(parsed_result.get("risk_score") or 0.0),
+        fraud_type=str(parsed_result.get("fraud_type") or "unknown"),
+        confidence=float(parsed_result.get("confidence") or 0.0),
+        flags=parsed_result.get("flags") if isinstance(parsed_result.get("flags"), list) else [],
+        explanation=str(parsed_result.get("explanation") or threat.explanation or "No explanation available."),
+        llm_enhanced=bool(parsed_result.get("llm_enhanced")),
+        llm_explanation=parsed_result.get("llm_explanation"),
+        nlp_score=float(parsed_result.get("nlp_score") or 0.0),
+        similarity_score=float(parsed_result.get("similarity_score") or 0.0),
+        stylometry_score=float(parsed_result.get("stylometry_score") or 0.0),
+        prediction=parsed_prediction,
+        similarity=SMSVectorSearchResponse(**similarity_payload),
+        url_risk_score=float(parsed_result.get("url_risk_score") or 0.0),
+        urgency_score=float(parsed_result.get("urgency_score") or 0.0),
+    )
+
+
+def _normalize_email_history_payload(req: PhishingRequestModel, threat: EmailThreatResult) -> LatestEmailAnalyzeResponse:
+    parsed_result = _safe_json_loads(threat.result)
+    parsed_prediction = _safe_json_loads(threat.prediction)
+    parsed_similarity = parsed_result.get("similarity") if isinstance(parsed_result.get("similarity"), dict) else {}
+
+    sender = str(parsed_result.get("sender") or "")
+    subject = str(parsed_result.get("subject") or "")
+    body = str(parsed_result.get("body") or "")
+    if not sender and req.text:
+        # request text format: From: <sender>\nSubject: <subject>\n\n<body>
+        lines = req.text.splitlines()
+        if lines and lines[0].lower().startswith("from:"):
+            sender = lines[0].split(":", 1)[1].strip()
+        if len(lines) > 1 and lines[1].lower().startswith("subject:"):
+            subject = lines[1].split(":", 1)[1].strip()
+        if not body:
+            parts = req.text.split("\n\n", 1)
+            body = parts[1].strip() if len(parts) > 1 else ""
+
+    return LatestEmailAnalyzeResponse(
+        message_id=str(parsed_result.get("message_id") or str(req.id)),
+        thread_id=parsed_result.get("thread_id"),
+        sender=sender,
+        subject=subject,
+        body=body,
+        risk_score=float(parsed_result.get("risk_score") or 0.0),
+        nlp_score=float(parsed_result.get("nlp_score") or 0.0),
+        similarity_score=float(parsed_result.get("similarity_score") or 0.0),
+        stylometry_score=float(parsed_result.get("stylometry_score") or 0.0),
+        confidence=float(parsed_result.get("confidence") or 0.0),
+        fraud_type=str(parsed_result.get("fraud_type") or "unknown"),
+        nlp_prediction=parsed_prediction,
+        similarity=parsed_similarity,
+        llm_enhanced=bool(parsed_result.get("llm_enhanced")),
+        llm_explanation=parsed_result.get("llm_explanation"),
+        llm_label=parsed_result.get("llm_label"),
+        llm_confidence=float(parsed_result.get("llm_confidence")) if parsed_result.get("llm_confidence") is not None else None,
+    )
 
 
 @router.get("/sms/history", status_code=status.HTTP_200_OK)
@@ -84,6 +172,32 @@ def get_sms_history(request: Request, db: Session = Depends(get_db)):
             "fraud_type": fraud_type,
         })
     return history
+
+
+@router.get("/sms/history/{request_id}", response_model=SMSAnalyzeResponse, status_code=status.HTTP_200_OK)
+def get_sms_history_detail(request_id: str, request: Request, db: Session = Depends(get_db)):
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+
+    try:
+        request_uuid = UUID(request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request_id") from exc
+
+    query = (
+        db.query(PhishingRequestModel, SmsThreatResult)
+        .join(SmsThreatResult, SmsThreatResult.request_id == PhishingRequestModel.id)
+        .filter(PhishingRequestModel.id == request_uuid)
+        .filter(PhishingRequestModel.source == "sms")
+    )
+    if user_id:
+        query = query.filter(PhishingRequestModel.user_id == user_id)
+
+    row = query.first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SMS analysis not found")
+
+    req, threat = row
+    return _normalize_sms_history_payload(req, threat)
 
 
 @router.get("/email/history", status_code=status.HTTP_200_OK)
@@ -122,6 +236,32 @@ def get_email_history(request: Request, db: Session = Depends(get_db)):
             "fraud_type": fraud_type,
         })
     return history
+
+
+@router.get("/email/history/{request_id}", response_model=LatestEmailAnalyzeResponse, status_code=status.HTTP_200_OK)
+def get_email_history_detail(request_id: str, request: Request, db: Session = Depends(get_db)):
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+
+    try:
+        request_uuid = UUID(request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request_id") from exc
+
+    query = (
+        db.query(PhishingRequestModel, EmailThreatResult)
+        .join(EmailThreatResult, EmailThreatResult.request_id == PhishingRequestModel.id)
+        .filter(PhishingRequestModel.id == request_uuid)
+        .filter(PhishingRequestModel.source == "email")
+    )
+    if user_id:
+        query = query.filter(PhishingRequestModel.user_id == user_id)
+
+    row = query.first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email analysis not found")
+
+    req, threat = row
+    return _normalize_email_history_payload(req, threat)
 
 
 def _truncate_body_preview(body: str, max_chars: int = 180) -> str:
@@ -249,6 +389,23 @@ def _run_email_full_analysis(
         llm_label=llm_label,
         llm_confidence=llm_confidence,
     )
+
+
+def _resolve_user_from_cookies(request: Request) -> str:
+    existing_user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+    if existing_user_id:
+        return str(existing_user_id)
+
+    access_token = request.cookies.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication cookie missing")
+
+    user_id = get_token_subject(access_token, expected_type="access")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token")
+
+    request.state.user_id = user_id
+    return str(user_id)
 
 ## API route for analyzing text
 
@@ -448,6 +605,31 @@ def analyze_email_manual(payload: EmailAnalyzeManualRequest, request: Request, d
     print("[email-debug] Starting /text/email/analyze/extension")
     try:
         user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+        return _run_email_full_analysis(
+            db=db,
+            message_id="manual-input",
+            thread_id="manual-input",
+            sender=payload.sender,
+            subject=payload.subject,
+            body=payload.body,
+            with_llm_explanation=payload.with_llm_explanation,
+            user_id=user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (RuntimeError, FileNotFoundError, GmailClientError) as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+
+@router.post("/email/analyze", response_model=LatestEmailAnalyzeResponse, status_code=status.HTTP_200_OK)
+def analyze_email_manual_with_user_cookie(
+    payload: EmailAnalyzeManualRequest,
+    request: Request,
+    user_id: str = Depends(_resolve_user_from_cookies),
+    db: Session = Depends(get_db),
+):
+    print("[email-debug] Starting /text/email/analyze")
+    try:
         return _run_email_full_analysis(
             db=db,
             message_id="manual-input",

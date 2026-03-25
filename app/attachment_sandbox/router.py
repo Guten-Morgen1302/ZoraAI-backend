@@ -110,6 +110,104 @@ def _normalize_engine_results(engines: Any) -> dict[str, AttachmentEngineResult]
     return result
 
 
+def _safe_json_loads(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _safe_user_uuid(request: Request) -> uuid.UUID | None:
+    state_user = request.state.user_id if hasattr(request.state, "user_id") else None
+    if state_user is None:
+        return None
+    if isinstance(state_user, uuid.UUID):
+        return state_user
+    try:
+        return uuid.UUID(str(state_user))
+    except (ValueError, TypeError):
+        return None
+
+
+@router.get("/history", status_code=status.HTTP_200_OK)
+def get_attachment_history(request: Request, db: Session = Depends(get_db)):
+    user_id = _safe_user_uuid(request)
+
+    query = (
+        db.query(AttachmentRequest, AttachmentAnalysis)
+        .outerjoin(AttachmentAnalysis, AttachmentAnalysis.request_id == AttachmentRequest.id)
+    )
+    if user_id is not None:
+        query = query.filter(AttachmentRequest.user_id == user_id)
+
+    rows = query.order_by(AttachmentRequest.created_at.desc()).limit(20).all()
+
+    history: list[dict[str, Any]] = []
+    for req_row, analysis_row in rows:
+        final_verdict = None
+        flagged_engines = 0
+        if analysis_row and analysis_row.engines:
+            parsed_engines = _safe_json_loads(analysis_row.engines)
+            final_verdict = analysis_row.final_verdict
+            for payload in parsed_engines.values():
+                if isinstance(payload, dict) and bool(payload.get("is_flagged")):
+                    flagged_engines += 1
+
+        history.append(
+            {
+                "request_id": str(req_row.id),
+                "filename": req_row.filename,
+                "file_size": req_row.file_size,
+                "created_at": req_row.created_at.isoformat() if req_row.created_at else None,
+                "status": req_row.status,
+                "final_verdict": final_verdict,
+                "flagged_engines": flagged_engines,
+            }
+        )
+    return history
+
+
+@router.get("/history/{request_id}", response_model=AttachmentAnalyzeResponse, status_code=status.HTTP_200_OK)
+def get_attachment_history_detail(request_id: str, request: Request, db: Session = Depends(get_db)):
+    user_id = _safe_user_uuid(request)
+
+    try:
+        request_uuid = uuid.UUID(request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request_id") from exc
+
+    query = (
+        db.query(AttachmentRequest, AttachmentAnalysis)
+        .join(AttachmentAnalysis, AttachmentAnalysis.request_id == AttachmentRequest.id)
+        .filter(AttachmentRequest.id == request_uuid)
+    )
+    if user_id is not None:
+        query = query.filter(AttachmentRequest.user_id == user_id)
+
+    row = query.first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment analysis not found")
+
+    req_row, analysis_row = row
+    parsed_engines = _safe_json_loads(analysis_row.engines)
+    parsed_features = _safe_json_loads(analysis_row.features)
+
+    return AttachmentAnalyzeResponse(
+        request_id=req_row.id,
+        analysis_id=analysis_row.id,
+        filename=req_row.filename,
+        file_size=req_row.file_size,
+        s3_url=req_row.s3_url,
+        status=analysis_row.status,
+        final_verdict=analysis_row.final_verdict,
+        engines=_normalize_engine_results(parsed_engines),
+        features=parsed_features,
+    )
+
+
 @router.post("/analyze", response_model=AttachmentAnalyzeResponse, status_code=status.HTTP_200_OK)
 async def analyze_attachment(
     request: Request,

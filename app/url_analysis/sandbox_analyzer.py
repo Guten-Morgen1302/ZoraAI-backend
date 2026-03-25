@@ -26,6 +26,8 @@ from app.url_analysis.fingerprint_beacon_analyzer import (
 
 DEFAULT_TIMEOUT_MS = 18_000
 MAX_NETWORK_LOGS = 500
+PLAYWRIGHT_LAUNCH_RETRIES = 2
+PLAYWRIGHT_LAUNCH_RETRY_DELAY_SEC = 0.35
 
 logger = logging.getLogger("zora.url_analysis.sandbox_analyzer")
 
@@ -140,25 +142,58 @@ def _loop_supports_subprocess(loop: asyncio.AbstractEventLoop) -> bool:
     return "ProactorEventLoop" in loop.__class__.__name__
 
 
-async def launch_browser() -> tuple[Any, Any]:
+def _is_playwright_driver_disconnect(exc: Exception) -> bool:
+    """Detect transient Playwright driver disconnection failure signature."""
+    message = str(exc or "").lower()
+    return "connection closed while reading from the driver" in message
+
+
+async def launch_browser(run_id: str | None = None) -> tuple[Any, Any]:
     """Launch async Playwright Chromium browser in hardened headless mode."""
     from playwright.async_api import async_playwright
 
-    playwright = await async_playwright().start()
-    browser = await playwright.chromium.launch(
-        headless=True,
-        args=[
-            "--disable-notifications",
-            "--disable-popup-blocking",
-            "--disable-background-networking",
-            "--disable-background-timer-throttling",
-            "--disable-renderer-backgrounding",
-            "--disable-dev-shm-usage",
-            "--mute-audio",
-            "--no-first-run",
-        ],
-    )
-    return playwright, browser
+    last_exc: Exception | None = None
+    for attempt in range(1, PLAYWRIGHT_LAUNCH_RETRIES + 1):
+        playwright = None
+        try:
+            playwright = await async_playwright().start()
+            browser = await playwright.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-notifications",
+                    "--disable-popup-blocking",
+                    "--disable-background-networking",
+                    "--disable-background-timer-throttling",
+                    "--disable-renderer-backgrounding",
+                    "--disable-dev-shm-usage",
+                    "--mute-audio",
+                    "--no-first-run",
+                ],
+            )
+            return playwright, browser
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if playwright is not None:
+                try:
+                    await playwright.stop()
+                except Exception:
+                    pass
+
+            should_retry = _is_playwright_driver_disconnect(exc) and attempt < PLAYWRIGHT_LAUNCH_RETRIES
+            if should_retry:
+                _debug(
+                    run_id or "no-run-id",
+                    f"playwright launch retry={attempt + 1} after transient driver disconnect",
+                    level="warning",
+                )
+                await asyncio.sleep(PLAYWRIGHT_LAUNCH_RETRY_DELAY_SEC)
+                continue
+
+            raise
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("playwright_launch_failed")
 
 
 def capture_network(page: Any, initial_registered_domain: str) -> dict[str, Any]:
@@ -307,7 +342,7 @@ async def _analyze_url_impl(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> d
 
     try:
         current_stage = "launch_browser"
-        playwright, browser = await launch_browser()
+        playwright, browser = await launch_browser(run_id=run_id)
         _debug(run_id, "browser launched")
 
         current_stage = "create_context"
@@ -519,6 +554,25 @@ def analyze_url_sync(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[str
 
     try:
         with asyncio.Runner() as runner:
+            loop = runner.get_loop()
+            previous_handler = loop.get_exception_handler()
+
+            def _loop_exception_handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+                exc = context.get("exception")
+                message = str(exc or context.get("message") or "")
+
+                # Playwright sometimes leaves an init task unresolved when driver bootstrap dies.
+                # We already surface the primary error path from _analyze_url_impl.
+                if "Connection.init: Connection closed while reading from the driver" in message:
+                    _debug(run_id, "suppressed orphaned Playwright init task exception", level="warning")
+                    return
+
+                if previous_handler is not None:
+                    previous_handler(loop, context)
+                else:
+                    loop.default_exception_handler(context)
+
+            loop.set_exception_handler(_loop_exception_handler)
             return runner.run(_analyze_url_impl(normalized_url, timeout_ms=timeout_ms))
     except RuntimeError:
         # If already in an event loop, do not crash the caller.

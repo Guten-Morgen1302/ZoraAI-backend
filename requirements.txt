@@ -125,3 +125,4 @@ soundfile
 faster-whisper
 boto3
 Pinecone
+pdfminer
