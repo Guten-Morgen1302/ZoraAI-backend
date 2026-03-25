@@ -7,9 +7,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.schemas import AttachmentAnalyzeResponse, AttachmentEngineResult
+from app.attachment.llm_reasoner import explain_attachment_with_llm
 
 router = APIRouter(prefix="/attachment", tags=["attachment-analysis"])
 
@@ -56,7 +57,10 @@ def _normalize_engine_results(engines: Any) -> dict[str, AttachmentEngineResult]
 
 
 @router.post("/analyze", response_model=AttachmentAnalyzeResponse, status_code=status.HTTP_200_OK)
-async def analyze_attachment(file: UploadFile | None = File(default=None)):
+async def analyze_attachment(
+    file: UploadFile | None = File(default=None),
+    with_llm_explanation: str = Form("false"),
+):
     if file is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file uploaded")
 
@@ -84,13 +88,27 @@ async def analyze_attachment(file: UploadFile | None = File(default=None)):
         if not isinstance(report, dict):
             raise RuntimeError("Attachment pipeline returned an invalid response")
 
-        return AttachmentAnalyzeResponse(
-            filename=filename,
-            file_size=len(content),
-            final_verdict=str(report.get("final_verdict") or "unknown"),
-            engines=_normalize_engine_results(report.get("engines")),
-            features=report.get("features") if isinstance(report.get("features"), dict) else {},
-        )
+        response_kwargs = {
+            "filename": filename,
+            "file_size": len(content),
+            "final_verdict": str(report.get("final_verdict") or "unknown"),
+            "engines": _normalize_engine_results(report.get("engines")),
+            "features": report.get("features") if isinstance(report.get("features"), dict) else {},
+        }
+
+        is_llm_requested = with_llm_explanation.strip().lower() in ("true", "1", "yes", "y", "on")
+        if is_llm_requested:
+            llm_result = explain_attachment_with_llm(report, filename)
+            response_kwargs.update({
+                "llm_enhanced": True,
+                "llm_label": llm_result.get("final_label"),
+                "llm_confidence": llm_result.get("confidence"),
+                "llm_explanation": llm_result.get("explanation"),
+                "llm_key_indicators": llm_result.get("key_indicators", []),
+                "llm_recommendations": llm_result.get("recommendations", []),
+            })
+
+        return AttachmentAnalyzeResponse(**response_kwargs)
     except HTTPException:
         raise
     except RuntimeError as exc:
