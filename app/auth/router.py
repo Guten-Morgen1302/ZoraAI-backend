@@ -70,6 +70,29 @@ def login(payload: UserLogin, response: Response, db: Session = Depends(get_db))
     )
 
 
+@router.get("/me")
+def get_current_user(request: Request, db: Session = Depends(get_db)):
+    access_token = request.cookies.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    user_id = get_token_subject(access_token, expected_type="access")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+        "organization_name": user.organization_name,
+    }
+
+
 @router.post("/logout")
 def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     access_token = request.cookies.get("access_token")

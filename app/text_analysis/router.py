@@ -43,11 +43,85 @@ from app.text_analysis.service import (
     SMSFraudAnalysisService,
     TextAnalysisService,
 )
+from app.models import SmsThreatResult, EmailThreatResult, PhishingRequest as PhishingRequestModel
 
 router = APIRouter(prefix="/text", tags=["text-analysis"])
 GMAIL_CLIENT_SECRETS_FILE = Path(__file__).resolve().parent / "email_analyzer" / "gmail_client_secrets.json"
 EMAIL_SIMILARITY_TOP_K = 3
 EMAIL_SIMILARITY_THRESHOLD = 0.85
+
+
+@router.get("/sms/history", status_code=status.HTTP_200_OK)
+def get_sms_history(request: Request, db: Session = Depends(get_db)):
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+
+    query = (
+        db.query(PhishingRequestModel, SmsThreatResult)
+        .outerjoin(SmsThreatResult, SmsThreatResult.request_id == PhishingRequestModel.id)
+        .filter(PhishingRequestModel.source == "sms")
+    )
+    if user_id:
+        query = query.filter(PhishingRequestModel.user_id == user_id)
+
+    rows = query.order_by(PhishingRequestModel.created_at.desc()).limit(20).all()
+
+    history = []
+    for req, threat in rows:
+        risk_score = None
+        fraud_type = None
+        if threat and threat.result:
+            try:
+                parsed = json.loads(threat.result)
+                risk_score = parsed.get("risk_score")
+                fraud_type = parsed.get("fraud_type")
+            except Exception:
+                pass
+        history.append({
+            "request_id": str(req.id),
+            "text": (req.text or "")[:120],
+            "created_at": req.created_at.isoformat() if req.created_at else None,
+            "risk_score": risk_score,
+            "fraud_type": fraud_type,
+        })
+    return history
+
+
+@router.get("/email/history", status_code=status.HTTP_200_OK)
+def get_email_history(request: Request, db: Session = Depends(get_db)):
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+
+    query = (
+        db.query(PhishingRequestModel, EmailThreatResult)
+        .outerjoin(EmailThreatResult, EmailThreatResult.request_id == PhishingRequestModel.id)
+        .filter(PhishingRequestModel.source == "email")
+    )
+    if user_id:
+        query = query.filter(PhishingRequestModel.user_id == user_id)
+
+    rows = query.order_by(PhishingRequestModel.created_at.desc()).limit(20).all()
+
+    history = []
+    for req, threat in rows:
+        risk_score = None
+        fraud_type = None
+        subject = None
+        if threat and threat.result:
+            try:
+                parsed = json.loads(threat.result)
+                risk_score = parsed.get("risk_score")
+                fraud_type = parsed.get("fraud_type")
+                subject = parsed.get("subject")
+            except Exception:
+                pass
+        history.append({
+            "request_id": str(req.id),
+            "text": (req.text or "")[:120],
+            "subject": subject,
+            "created_at": req.created_at.isoformat() if req.created_at else None,
+            "risk_score": risk_score,
+            "fraud_type": fraud_type,
+        })
+    return history
 
 
 def _truncate_body_preview(body: str, max_chars: int = 180) -> str:
