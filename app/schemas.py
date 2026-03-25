@@ -215,6 +215,12 @@ class AttachmentAnalyzeResponse(BaseModel):
 	final_verdict: str
 	engines: dict[str, AttachmentEngineResult]
 	features: dict[str, Any]
+	llm_enhanced: bool = False
+	llm_label: str | None = None
+	llm_confidence: float | None = None
+	llm_explanation: str | None = None
+	llm_key_indicators: list[str] = Field(default_factory=list)
+	llm_recommendations: list[str] = Field(default_factory=list)
 
 
 class VoiceAnalysisResponse(BaseModel):

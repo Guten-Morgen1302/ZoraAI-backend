@@ -6,9 +6,9 @@ app/text_analysis/sms_analyzer/sms_model
 **app/__pycache__/
 __pycache__/
 .vscode/
-app/attachment-sandbox/tests/python-3.12.5-amd64.exe
-app/attachment-sandbox/tests/static_predictor.py
-app/attachment-sandbox/data/
+app/attachment_sandbox/tests/python-3.12.5-amd64.exe
+app/attachment_sandbox/tests/static_predictor.py
+app/attachment_sandbox/data/
 malware_scan/  
 *.py[cod]
 *.pyo
