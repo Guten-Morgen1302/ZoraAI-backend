@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import String, cast, or_
 from sqlalchemy.orm import Session
 
-from app.models import ConfirmedFraudCase, EmailThreatResult, PhishingAnalysis, PhishingRequest, SmsThreatResult
+from app.models import ConfirmedFraudCase, EmailThreatResult, PhishingAnalysis, PhishingRequest, SmsFeedback, SmsThreatResult
 
 
 class PhishingRepository:
@@ -94,3 +95,39 @@ class PhishingRepository:
         self.db.add(fraud_case)
         self.db.flush()
         return fraud_case
+
+    def create_sms_feedback(
+        self,
+        *,
+        analysis_id: str,
+        input_hash: str,
+        model_prediction: str,
+        human_label: str,
+        model_confidence: float,
+        feedback_type: str,
+        notes: str | None,
+    ) -> SmsFeedback:
+        feedback = SmsFeedback(
+            analysis_id=analysis_id,
+            input_hash=input_hash,
+            model_prediction=model_prediction,
+            human_label=human_label,
+            model_confidence=model_confidence,
+            feedback_type=feedback_type,
+            notes=notes,
+        )
+        self.db.add(feedback)
+        self.db.flush()
+        return feedback
+
+    def get_sms_feedback_for_retraining(self, limit: int | None = None):
+        query = (
+            self.db.query(SmsFeedback, PhishingRequest)
+            .join(PhishingRequest, cast(PhishingRequest.id, String) == SmsFeedback.analysis_id)
+            .filter(PhishingRequest.source == "sms")
+            .filter(or_(SmsFeedback.feedback_type == "incorrect", SmsFeedback.feedback_type == "modified"))
+            .order_by(SmsFeedback.created_at.desc())
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()

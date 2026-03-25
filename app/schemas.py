@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr
 from enum import Enum
@@ -225,3 +225,48 @@ class VoiceAnalysisResponse(BaseModel):
 	voice_analysis: dict[str, Any]
 	transcript: str
 	fraud_report: dict[str, Any]
+
+
+class SMSFeedbackLabel(str, Enum):
+	scam = "scam"
+	safe = "safe"
+
+
+class SMSFeedbackType(str, Enum):
+	correct = "correct"
+	incorrect = "incorrect"
+	modified = "modified"
+
+
+class SMSFeedbackRequest(BaseModel):
+	analysis_id: str = Field(min_length=1, max_length=128)
+	source: Literal["sms"] = "sms"
+	human_label: SMSFeedbackLabel
+	model_prediction: str = Field(min_length=1, max_length=64)
+	model_confidence: float = Field(ge=0.0, le=1.0)
+	feedback_type: SMSFeedbackType
+	notes: str | None = Field(default=None, max_length=2000)
+
+
+class SMSFeedbackResponse(BaseModel):
+	id: int
+	analysis_id: str
+	input_hash: str
+	status: str
+	created_at: str
+
+
+class SMSFeedbackRetrainRequest(BaseModel):
+	max_records: int | None = Field(default=None, ge=1, le=50000)
+	namespace: str = Field(default="fraud_vectors", min_length=1, max_length=128)
+	batch_size: int = Field(default=128, ge=1, le=1000)
+
+
+class SMSFeedbackRetrainResponse(BaseModel):
+	status: str
+	candidate_feedback: int
+	exported_rows: int
+	csv_path: str
+	namespace: str
+	vectors_inserted: int
+	vectors_skipped: int

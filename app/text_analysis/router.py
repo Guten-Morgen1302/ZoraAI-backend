@@ -18,6 +18,10 @@ from app.schemas import (
     LatestEmailAnalyzeResponse,
     SMSAnalyzeRequest,
     SMSAnalyzeResponse,
+    SMSFeedbackRequest,
+    SMSFeedbackResponse,
+    SMSFeedbackRetrainRequest,
+    SMSFeedbackRetrainResponse,
     SMSModelPredictRequest,
     SMSModelPredictResponse,
     SMSVectorSearchRequest,
@@ -45,6 +49,7 @@ from app.text_analysis.service import (
     SMSFraudAnalysisService,
     TextAnalysisService,
 )
+from app.text_analysis.sms_analyzer.feeback_mechanism.sms_feedback_service import SMSFeedbackService
 from app.auth.security import get_token_subject
 from app.models import SmsThreatResult, EmailThreatResult, PhishingRequest as PhishingRequestModel
 
@@ -484,6 +489,58 @@ def analyze_sms(payload: SMSAnalyzeRequest, request: Request, db: Session = Depe
         similarity=SMSVectorSearchResponse(**result.similarity),
         url_risk_score=result.url_risk_score,
         urgency_score=result.urgency_score,
+    )
+
+
+@router.post("/sms/feedback", response_model=SMSFeedbackResponse, status_code=status.HTTP_201_CREATED)
+def submit_sms_feedback(payload: SMSFeedbackRequest, db: Session = Depends(get_db)):
+    service = SMSFeedbackService(db)
+    try:
+        result = service.submit_feedback(
+            analysis_id=payload.analysis_id,
+            source=payload.source,
+            human_label=payload.human_label,
+            model_prediction=payload.model_prediction,
+            model_confidence=payload.model_confidence,
+            feedback_type=payload.feedback_type,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    return SMSFeedbackResponse(
+        id=result.id,
+        analysis_id=result.analysis_id,
+        input_hash=result.input_hash,
+        status="stored",
+        created_at=result.created_at,
+    )
+
+
+@router.post("/sms/feedback/retrain", response_model=SMSFeedbackRetrainResponse, status_code=status.HTTP_200_OK)
+def retrain_from_sms_feedback(payload: SMSFeedbackRetrainRequest, db: Session = Depends(get_db)):
+    service = SMSFeedbackService(db)
+    try:
+        result = service.export_retraining_dataset_and_upsert(
+            max_records=payload.max_records,
+            namespace=payload.namespace,
+            batch_size=payload.batch_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (RuntimeError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    return SMSFeedbackRetrainResponse(
+        status="completed",
+        candidate_feedback=result.candidate_feedback,
+        exported_rows=result.exported_rows,
+        csv_path=result.csv_path,
+        namespace=result.namespace,
+        vectors_inserted=result.vectors_inserted,
+        vectors_skipped=result.vectors_skipped,
     )
 
 

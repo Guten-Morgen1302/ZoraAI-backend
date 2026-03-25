@@ -130,6 +130,29 @@ class ConfirmedFraudCase(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class SmsFeedback(Base):
+
+    __tablename__ = "sms_feedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    analysis_id = Column(String, nullable=False, index=True)
+
+    input_hash = Column(String(64), nullable=False, index=True)
+
+    model_prediction = Column(String, nullable=False)
+
+    human_label = Column(String, nullable=False)
+
+    model_confidence = Column(Float, nullable=False)
+
+    feedback_type = Column(String, nullable=False)
+
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class URLAnalysisRequest(Base):
 
     __tablename__ = "url_analysis_requests"
