@@ -34,7 +34,7 @@ For every SMS analysis request, the engine executes an ordered pipeline:
 2. URL risk analysis and urgency estimation
 3. NLP semantic prediction with confidence
 4. Stylometry score estimation from message writing style
-5. Similarity search in Qdrant vector memory
+5. Similarity search in Pinecone vector memory
 6. Multi-signal weighted scoring and fraud typing
 7. Conditional LLM enhancement (or forced LLM explanation mode)
 8. Response construction and persistence
@@ -271,9 +271,9 @@ If stylometry artifacts are unavailable at inference time, the pipeline graceful
 
 The vector layer uses sentence-transformer embeddings (all-MiniLM-L6-v2, 384 dimensions) for semantic retrieval.
 
-### 8.2 Qdrant Store Design
+### 8.2 Pinecone Store Design
 
-Embeddings are stored in Qdrant collection fraud_vectors with payload metadata such as:
+Embeddings are stored in Pinecone namespace fraud_vectors with metadata such as:
 
 - message text
 - fraud label
@@ -430,7 +430,7 @@ Vector memory writes are server-controlled and no longer exposed as a public use
 Current behavior:
 
 1. SMS analysis completes normally
-2. if model confidence is >= 0.85, embedding is auto-upserted to Qdrant
+2. if model confidence is >= 0.85, embedding is auto-upserted to Pinecone
 3. failures in memory sync are logged without breaking primary response flow
 
 This keeps vector memory ingestion protected while still enabling continuous enrichment from strong model signals.

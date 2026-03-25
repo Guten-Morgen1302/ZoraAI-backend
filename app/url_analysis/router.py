@@ -21,6 +21,16 @@ URL_RISK_ENGINE_READY = False
 URL_RISK_ENGINE_ERROR: str | None = None
 
 
+def _safe_json_loads(raw: str | None) -> dict[str, object]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _to_float(value: object, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -182,6 +192,65 @@ def _sandbox_features_for_response(sandbox_features: object) -> dict[str, object
     sanitized = dict(sandbox_features)
     sanitized.pop("raw_html", None)
     return sanitized
+
+
+@router.get("/history", status_code=status.HTTP_200_OK)
+def get_url_history(request: Request, db: Session = Depends(get_db)):
+    user_id = _safe_user_uuid(request)
+
+    query = (
+        db.query(URLAnalysisRequest, URLThreatResult)
+        .outerjoin(URLThreatResult, URLThreatResult.request_id == URLAnalysisRequest.id)
+    )
+    if user_id is not None:
+        query = query.filter(URLAnalysisRequest.user_id == user_id)
+
+    rows = query.order_by(URLAnalysisRequest.created_at.desc()).limit(20).all()
+
+    history: list[dict[str, object]] = []
+    for req_row, result_row in rows:
+        parsed_result = _safe_json_loads(result_row.result) if result_row and result_row.result else {}
+        history.append(
+            {
+                "request_id": str(req_row.id),
+                "url": req_row.normalized_url,
+                "created_at": req_row.created_at.isoformat() if req_row.created_at else None,
+                "status": req_row.status,
+                "risk_score": _to_float(parsed_result.get("risk_score"), 0.0) if parsed_result else None,
+                "risk_level": str(parsed_result.get("risk_level") or "") if parsed_result else None,
+                "phishing_probability": _to_float(parsed_result.get("phishing_probability"), 0.0) if parsed_result else None,
+            }
+        )
+    return history
+
+
+@router.get("/history/{request_id}", response_model=URLAnalyzeResponse, status_code=status.HTTP_200_OK)
+def get_url_history_detail(request_id: str, request: Request, db: Session = Depends(get_db)):
+    user_id = _safe_user_uuid(request)
+
+    try:
+        request_uuid = uuid.UUID(request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request_id") from exc
+
+    query = (
+        db.query(URLAnalysisRequest, URLThreatResult)
+        .join(URLThreatResult, URLThreatResult.request_id == URLAnalysisRequest.id)
+        .filter(URLAnalysisRequest.id == request_uuid)
+    )
+    if user_id is not None:
+        query = query.filter(URLAnalysisRequest.user_id == user_id)
+
+    row = query.first()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL analysis not found")
+
+    _, result_row = row
+    parsed_result = _safe_json_loads(result_row.result)
+    if not parsed_result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL analysis payload missing")
+
+    return URLAnalyzeResponse(**parsed_result)
 
 
 @router.post("/analyze", response_model=URLAnalyzeResponse, status_code=status.HTTP_200_OK)

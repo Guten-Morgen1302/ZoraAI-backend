@@ -206,8 +206,12 @@ class AttachmentEngineResult(BaseModel):
 
 
 class AttachmentAnalyzeResponse(BaseModel):
+	request_id: UUID | None = None
+	analysis_id: UUID | None = None
 	filename: str
 	file_size: int
+	s3_url: str | None = None
+	status: str | None = None
 	final_verdict: str
 	engines: dict[str, AttachmentEngineResult]
 	features: dict[str, Any]
@@ -217,3 +221,13 @@ class AttachmentAnalyzeResponse(BaseModel):
 	llm_explanation: str | None = None
 	llm_key_indicators: list[str] = Field(default_factory=list)
 	llm_recommendations: list[str] = Field(default_factory=list)
+
+
+class VoiceAnalysisResponse(BaseModel):
+	request_id: UUID
+	analysis_id: UUID
+	status: str
+	filename: str
+	voice_analysis: dict[str, Any]
+	transcript: str
+	fraud_report: dict[str, Any]

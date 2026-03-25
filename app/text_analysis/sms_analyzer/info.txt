@@ -120,7 +120,7 @@ Output:
 {
   "stylometry_score": 0.65
 }
-🔍 STEP 5: Use Your Qdrant DB (THIS IS YOUR SUPERPOWER)
+🔍 STEP 5: Use Your Pinecone DB (THIS IS YOUR SUPERPOWER)
 
 Now finally use what you built.
 
@@ -131,7 +131,7 @@ Flow:
 
 Convert incoming SMS → embedding
 
-Query Qdrant
+Query Pinecone
 
 Get top K similar messages
 
@@ -230,6 +230,6 @@ user marks message as fraud
 
 PostgreSQL (confirmed fraud_cases)
 
-Qdrant (new embedding)
+Pinecone (new embedding)
 
 👉 This = self-improving system

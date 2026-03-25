@@ -29,6 +29,9 @@ class User(Base):
 
     updated_at = Column(DateTime, default=datetime.utcnow)
 
+    voice_requests = relationship("VoiceRequest", back_populates="user")
+    attachment_requests = relationship("AttachmentRequest", back_populates="user")
+
 
 class PhishingRequest(Base):
 
@@ -163,4 +166,96 @@ class URLThreatResult(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     request = relationship("URLAnalysisRequest", back_populates="result")
+
+
+class VoiceRequest(Base):
+
+    __tablename__ = "voice_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+    filename = Column(String, nullable=False)
+
+    mime_type = Column(String, nullable=True)
+
+    file_size = Column(Integer, nullable=False, default=0)
+
+    transcript = Column(Text, nullable=False)
+
+    status = Column(String, nullable=False, default="transcribed")
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user = relationship("User", back_populates="voice_requests")
+    analysis = relationship("VoiceAnalysis", back_populates="request", uselist=False)
+
+
+class VoiceAnalysis(Base):
+
+    __tablename__ = "voice_analysis"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    request_id = Column(UUID(as_uuid=True), ForeignKey("voice_requests.id"), nullable=False, unique=True)
+
+    voice_result = Column(Text, nullable=False)
+
+    fraud_report = Column(Text, nullable=False)
+
+    status = Column(String, nullable=False, default="completed")
+
+    error_message = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    request = relationship("VoiceRequest", back_populates="analysis")
+
+
+class AttachmentRequest(Base):
+
+    __tablename__ = "attachment_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+    filename = Column(String, nullable=False)
+
+    mime_type = Column(String, nullable=True)
+
+    file_size = Column(Integer, nullable=False, default=0)
+
+    s3_url = Column(Text, nullable=False)
+
+    status = Column(String, nullable=False, default="uploaded")
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user = relationship("User", back_populates="attachment_requests")
+    analysis = relationship("AttachmentAnalysis", back_populates="request", uselist=False)
+
+
+class AttachmentAnalysis(Base):
+
+    __tablename__ = "attachment_analysis"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    request_id = Column(UUID(as_uuid=True), ForeignKey("attachment_requests.id"), nullable=False, unique=True)
+
+    final_verdict = Column(String, nullable=False, default="unknown")
+
+    engines = Column(Text, nullable=False)
+
+    features = Column(Text, nullable=False)
+
+    status = Column(String, nullable=False, default="completed")
+
+    error_message = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    request = relationship("AttachmentRequest", back_populates="analysis")
 
