@@ -37,7 +37,7 @@ logging.basicConfig(
 )
 
 app.add_middleware(AuthLoggingMiddleware)
-app.add_middleware(ShadowGuardMiddleware)
+# app.add_middleware(ShadowGuardMiddleware)
 
 Base.metadata.create_all(bind=engine)
 
