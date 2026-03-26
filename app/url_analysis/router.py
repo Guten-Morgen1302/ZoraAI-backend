@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import URLAnalysisRequest, URLThreatResult
-from app.schemas import URLAnalyzeRequest, URLAnalyzeResponse
+from app.models import URLAnalysisRequest, URLFeedback, URLThreatResult
+from app.schemas import URLAnalyzeRequest, URLAnalyzeResponse, URLFeedbackRequest, URLFeedbackResponse
 from app.url_analysis.llm_reasoner import explain_url_with_llm
 from app.url_analysis.ml_risk_engine import URLMLRiskEngine
 from app.url_analysis.url_analysis import extract_phase_4_features_async
@@ -192,6 +192,41 @@ def _sandbox_features_for_response(sandbox_features: object) -> dict[str, object
     sanitized = dict(sandbox_features)
     sanitized.pop("raw_html", None)
     return sanitized
+
+
+@router.post("/feedback", response_model=URLFeedbackResponse, status_code=status.HTTP_201_CREATED)
+def submit_url_feedback(payload: URLFeedbackRequest, request: Request, db: Session = Depends(get_db)):
+    try:
+        request_uuid = uuid.UUID(payload.analysis_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid analysis_id") from exc
+
+    analysis_exists = db.query(URLAnalysisRequest.id).filter(URLAnalysisRequest.id == request_uuid).first()
+    if not analysis_exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL analysis not found")
+
+    feedback_row = URLFeedback(
+        analysis_id=str(request_uuid),
+        user_id=_safe_user_uuid(request),
+        normalized_url=payload.normalized_url,
+        model_prediction=payload.model_prediction,
+        model_risk_score=payload.model_risk_score,
+        model_phishing_probability=payload.model_phishing_probability,
+        human_label=payload.human_label.value,
+        prediction_type=payload.prediction_type.value,
+        notes=payload.notes.strip() if payload.notes else None,
+    )
+
+    db.add(feedback_row)
+    db.commit()
+    db.refresh(feedback_row)
+
+    return URLFeedbackResponse(
+        id=feedback_row.id,
+        analysis_id=feedback_row.analysis_id,
+        status="stored",
+        created_at=feedback_row.created_at.isoformat(),
+    )
 
 
 @router.get("/history", status_code=status.HTTP_200_OK)

@@ -322,3 +322,32 @@ class EmailFeedbackRetrainResponse(BaseModel):
 	namespace: str
 	vectors_inserted: int
 	vectors_skipped: int
+
+
+class URLFeedbackLabel(str, Enum):
+	phishing = "phishing"
+	suspicious = "suspicious"
+	safe = "safe"
+
+
+class URLPredictionType(str, Enum):
+	wrong = "wrong"
+	modified = "modified"
+
+
+class URLFeedbackRequest(BaseModel):
+	analysis_id: str = Field(min_length=1, max_length=128)
+	human_label: URLFeedbackLabel
+	prediction_type: URLPredictionType
+	model_prediction: str = Field(min_length=1, max_length=64)
+	model_risk_score: float = Field(ge=0.0, le=1.0)
+	model_phishing_probability: float = Field(ge=0.0, le=1.0)
+	normalized_url: str = Field(min_length=4, max_length=4096)
+	notes: str | None = Field(default=None, max_length=2000)
+
+
+class URLFeedbackResponse(BaseModel):
+	id: int
+	analysis_id: str
+	status: str
+	created_at: str

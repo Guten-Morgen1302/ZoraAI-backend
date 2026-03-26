@@ -214,6 +214,33 @@ class URLThreatResult(Base):
     request = relationship("URLAnalysisRequest", back_populates="result")
 
 
+class URLFeedback(Base):
+
+    __tablename__ = "url_feedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    analysis_id = Column(String, nullable=False, index=True)
+
+    user_id = Column(UUID(as_uuid=True), nullable=True)
+
+    normalized_url = Column(Text, nullable=False)
+
+    model_prediction = Column(String, nullable=False)
+
+    model_risk_score = Column(Float, nullable=False)
+
+    model_phishing_probability = Column(Float, nullable=False)
+
+    human_label = Column(String, nullable=False)
+
+    prediction_type = Column(String, nullable=False)
+
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class VoiceRequest(Base):
 
     __tablename__ = "voice_requests"
