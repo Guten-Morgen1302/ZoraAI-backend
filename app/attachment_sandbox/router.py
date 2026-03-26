@@ -71,6 +71,13 @@ def _count_flagged_engines(engines: dict[str, object]) -> int:
     return flagged
 
 
+def _safe_rollback(db: Session) -> None:
+    try:
+        db.rollback()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _normalize_engine_results(engines: Any) -> dict[str, AttachmentEngineResult]:
     if not isinstance(engines, dict):
         return {}
@@ -125,7 +132,8 @@ async def analyze_attachment(
             filename=filename,
             mime_type=mime_type,
             file_size=len(content),
-            s3_url=None,
+            # Keep compatibility with existing DBs that still enforce NOT NULL.
+            s3_url="",
             status="processing",
         )
         db.add(request_row)
@@ -194,12 +202,14 @@ async def analyze_attachment(
 
         return AttachmentAnalyzeResponse(**response_kwargs)
     except HTTPException:
+        _safe_rollback(db)
         if request_row is not None:
             request_row.status = "failed"
             db.add(request_row)
             db.commit()
         raise
     except RuntimeError as exc:
+        _safe_rollback(db)
         if request_row is not None:
             request_row.status = "failed"
             db.add(request_row)
@@ -217,6 +227,7 @@ async def analyze_attachment(
             db.commit()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
+        _safe_rollback(db)
         if request_row is not None:
             request_row.status = "failed"
             db.add(request_row)

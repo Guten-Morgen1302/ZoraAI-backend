@@ -29,7 +29,6 @@ def extract_pdf_features(file_path: str) -> dict[str, Any]:
     features = _zeroed_pdf_features()
 
     try:
-        from pdfminer.high_level import extract_text
         from pdfminer.pdfparser import PDFParser
         from pdfminer.pdfdocument import PDFDocument
         from pdfminer.pdfpage import PDFPage
@@ -60,6 +59,8 @@ def extract_pdf_features(file_path: str) -> dict[str, Any]:
             _SUSPICIOUS_URL_PATTERN.search(raw_text)
         )
 
+    except ImportError as exc:
+        logger.warning("PDF parser dependency unavailable for %s: %s", file_path, exc)
     except Exception:
         logger.exception("PDF parsing failed for %s", file_path)
 

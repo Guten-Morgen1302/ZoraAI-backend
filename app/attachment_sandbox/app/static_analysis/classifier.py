@@ -62,7 +62,15 @@ def build_feature_vector(feature_dict: dict[str, Any]) -> np.ndarray:
 
 def load_model() -> Any:
     """Load the legacy XGBoost classifier from disk; return None if not yet trained."""
-    model_path = os.environ.get("STATIC_MODEL_PATH", "models/static_classifier.pkl")
+    default_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "models", "static_classifier.pkl")
+    )
+
+    env_path = os.environ.get("STATIC_MODEL_PATH")
+    if env_path:
+        model_path = env_path if os.path.isabs(env_path) else os.path.abspath(env_path)
+    else:
+        model_path = default_path
 
     if not os.path.isfile(model_path):
         logger.info("Static XGBoost model not found at %s", model_path)
