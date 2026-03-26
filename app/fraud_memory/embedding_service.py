@@ -3,7 +3,11 @@ from __future__ import annotations
 import logging
 from threading import Lock
 
-from app.fraud_memory.qdrant_client import QdrantVectorStore, get_qdrant_vector_store
+from app.fraud_memory.pinecone_client import (
+    DEFAULT_NAMESPACE,
+    PineconeVectorStore,
+    get_pinecone_vector_store,
+)
 
 logger = logging.getLogger("zora.fraud_memory.embedding")
 
@@ -35,9 +39,9 @@ def _load_model_once(model_name: str = MODEL_NAME):
 
 
 class FraudMemoryEmbeddingService:
-    """Service for generating embeddings and interacting with Qdrant."""
+    """Service for generating embeddings and interacting with Pinecone."""
 
-    def __init__(self, vector_store: QdrantVectorStore):
+    def __init__(self, vector_store: PineconeVectorStore):
         self.vector_store = vector_store
         self.model = _load_model_once()
 
@@ -71,7 +75,7 @@ class FraudMemoryEmbeddingService:
         return self.vector_store.search(embedding=embedding, limit=limit)
 
 
-def get_embedding_service() -> FraudMemoryEmbeddingService:
+def get_embedding_service(namespace: str = DEFAULT_NAMESPACE) -> FraudMemoryEmbeddingService:
     """Factory function designed for future FastAPI dependency injection."""
-    vector_store = get_qdrant_vector_store()
+    vector_store = get_pinecone_vector_store(namespace=namespace)
     return FraudMemoryEmbeddingService(vector_store=vector_store)

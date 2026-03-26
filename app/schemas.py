@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr
 from enum import Enum
@@ -147,6 +147,7 @@ class EmailAnalyzeManualRequest(BaseModel):
 
 
 class LatestEmailAnalyzeResponse(BaseModel):
+	request_id: UUID | None = None
 	message_id: str
 	thread_id: str | None = None
 	sender: str
@@ -206,8 +207,147 @@ class AttachmentEngineResult(BaseModel):
 
 
 class AttachmentAnalyzeResponse(BaseModel):
+	request_id: UUID | None = None
+	analysis_id: UUID | None = None
 	filename: str
 	file_size: int
+	s3_url: str | None = None
+	status: str | None = None
 	final_verdict: str
 	engines: dict[str, AttachmentEngineResult]
 	features: dict[str, Any]
+	llm_enhanced: bool = False
+	llm_label: str | None = None
+	llm_confidence: float | None = None
+	llm_explanation: str | None = None
+	llm_key_indicators: list[str] = Field(default_factory=list)
+	llm_recommendations: list[str] = Field(default_factory=list)
+
+
+class VoiceAnalysisResponse(BaseModel):
+	request_id: UUID
+	analysis_id: UUID
+	status: str
+	filename: str
+	voice_analysis: dict[str, Any]
+	transcript: str
+	fraud_report: dict[str, Any]
+
+
+class SMSFeedbackLabel(str, Enum):
+	scam = "scam"
+	safe = "safe"
+
+
+class SMSFeedbackType(str, Enum):
+	correct = "correct"
+	incorrect = "incorrect"
+	modified = "modified"
+
+
+class SMSFeedbackRequest(BaseModel):
+	analysis_id: str = Field(min_length=1, max_length=128)
+	source: Literal["sms"] = "sms"
+	human_label: SMSFeedbackLabel
+	model_prediction: str = Field(min_length=1, max_length=64)
+	model_confidence: float = Field(ge=0.0, le=1.0)
+	feedback_type: SMSFeedbackType
+	notes: str | None = Field(default=None, max_length=2000)
+
+
+class SMSFeedbackResponse(BaseModel):
+	id: int
+	analysis_id: str
+	input_hash: str
+	status: str
+	created_at: str
+
+
+class SMSFeedbackRetrainRequest(BaseModel):
+	max_records: int | None = Field(default=None, ge=1, le=50000)
+	namespace: str = Field(default="fraud_vectors", min_length=1, max_length=128)
+	batch_size: int = Field(default=128, ge=1, le=1000)
+
+
+class SMSFeedbackRetrainResponse(BaseModel):
+	status: str
+	candidate_feedback: int
+	exported_rows: int
+	csv_path: str
+	namespace: str
+	vectors_inserted: int
+	vectors_skipped: int
+
+
+class EmailFeedbackLabel(str, Enum):
+	phishing = "phishing"
+	genuine = "genuine"
+
+
+class EmailFeedbackType(str, Enum):
+	correct = "correct"
+	incorrect = "incorrect"
+	modified = "modified"
+
+
+class EmailFeedbackRequest(BaseModel):
+	analysis_id: str = Field(min_length=1, max_length=128)
+	source: Literal["email"] = "email"
+	human_label: EmailFeedbackLabel
+	model_prediction: str = Field(min_length=1, max_length=64)
+	model_confidence: float = Field(ge=0.0, le=1.0)
+	feedback_type: EmailFeedbackType
+	notes: str | None = Field(default=None, max_length=2000)
+
+
+class EmailFeedbackResponse(BaseModel):
+	id: int
+	analysis_id: str
+	input_hash: str
+	status: str
+	created_at: str
+
+
+class EmailFeedbackRetrainRequest(BaseModel):
+	max_records: int | None = Field(default=None, ge=1, le=50000)
+	namespace: str = Field(default="fraud_emails", min_length=1, max_length=128)
+	batch_size: int = Field(default=128, ge=1, le=1000)
+
+
+class EmailFeedbackRetrainResponse(BaseModel):
+	status: str
+	candidate_feedback: int
+	exported_rows: int
+	csv_path: str
+	namespace: str
+	vectors_inserted: int
+	vectors_skipped: int
+
+
+class URLFeedbackLabel(str, Enum):
+	phishing = "phishing"
+	suspicious = "suspicious"
+	safe = "safe"
+
+
+class URLPredictionType(str, Enum):
+	wrong = "wrong"
+	modified = "modified"
+
+
+class URLFeedbackRequest(BaseModel):
+	analysis_id: str = Field(min_length=1, max_length=128)
+	human_label: URLFeedbackLabel
+	prediction_type: URLPredictionType
+	model_prediction: str = Field(min_length=1, max_length=64)
+	model_risk_score: float = Field(ge=0.0, le=1.0)
+	model_phishing_probability: float = Field(ge=0.0, le=1.0)
+	normalized_url: str = Field(min_length=4, max_length=4096)
+	notes: str | None = Field(default=None, max_length=2000)
+
+
+class URLFeedbackResponse(BaseModel):
+	id: int
+	analysis_id: str
+	status: str
+	created_at: str

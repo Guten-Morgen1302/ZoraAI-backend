@@ -2,3 +2,5 @@ From the app folder:
 python -m fraud_memory.run_ingest_text
 python -m fraud_memory.run_ingest_emails
 python -m fraud_memory.run_ingest_url_phishing
+python -m fraud_memory.upsert_csv_to_pinecone --csv-path ./fraud_memory/data/data_text_scams/scam_data_new.csv --text-column text --label-column label --namespace fraud_vectors
+python -m fraud_memory.run_ingest_one

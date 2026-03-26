@@ -25,7 +25,7 @@ class SMSVectorSimilarityResult:
 
 
 class SMSVectorSimilarityService:
-    """Service for SMS embedding generation and Qdrant similarity search."""
+    """Service for SMS embedding generation and Pinecone similarity search."""
 
     def __init__(self, embedding_service: FraudMemoryEmbeddingService | None = None):
         self.embedding_service = embedding_service or get_embedding_service()
@@ -37,6 +37,7 @@ class SMSVectorSimilarityService:
         if threshold < 0 or threshold > 1:
             raise ValueError("threshold must be between 0 and 1")
 
+        logger.info("Running SMS vector similarity in Pinecone", extra={"namespace": "fraud_vectors", "top_k": top_k})
         matches = self.embedding_service.search_similar(text=validated_text, limit=top_k)
 
         best_match = matches[0] if matches else {}
@@ -72,7 +73,7 @@ def _get_sms_similarity_service() -> SMSVectorSimilarityService:
 
 
 def find_similar_sms_messages(text: str, top_k: int = 5, threshold: float = 0.85) -> dict[str, Any]:
-    """Public helper used by the API layer for SMS similarity lookups in Qdrant."""
+    """Public helper used by the API layer for SMS similarity lookups in Pinecone."""
     try:
         service = _get_sms_similarity_service()
         result = service.find_similar_messages(text=text, top_k=top_k, threshold=threshold)

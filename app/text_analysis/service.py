@@ -18,7 +18,7 @@ from app.text_analysis.threat_scoring import score_sms_threat
 
 DEFAULT_SIMILARITY_TOP_K = 3
 DEFAULT_SIMILARITY_THRESHOLD = 0.82
-AUTO_QDRANT_UPSERT_CONFIDENCE_THRESHOLD = 0.85
+AUTO_PINECONE_UPSERT_CONFIDENCE_THRESHOLD = 0.85
 
 logger = logging.getLogger("zora.text_analysis.service")
 
@@ -117,7 +117,7 @@ class SMSFraudAnalysisService:
         prediction: dict,
     ) -> None:
         normalized_confidence = self._normalize_probability(prediction.get("confidence"))
-        if normalized_confidence < AUTO_QDRANT_UPSERT_CONFIDENCE_THRESHOLD:
+        if normalized_confidence < AUTO_PINECONE_UPSERT_CONFIDENCE_THRESHOLD:
             return
 
         label = str(prediction.get("label") or "unknown").strip().lower()
@@ -127,7 +127,7 @@ class SMSFraudAnalysisService:
         try:
             vector_result = self.embedding_service.store_embedding(text=text, fraud_label=label)
             logger.info(
-                "Auto-upserted SMS prediction to Qdrant",
+                "Auto-upserted SMS prediction to Pinecone",
                 extra={
                     "request_id": request_id,
                     "vector_id": vector_result.get("id"),
@@ -137,7 +137,7 @@ class SMSFraudAnalysisService:
             )
         except Exception as exc:  # noqa: BLE001 - never fail core analysis on memory sync issues
             logger.warning(
-                "Failed to auto-upsert high-confidence SMS to Qdrant",
+                "Failed to auto-upsert high-confidence SMS to Pinecone",
                 extra={
                     "request_id": request_id,
                     "label": label,
@@ -275,7 +275,7 @@ class SMSFraudAnalysisService:
 
 
 class SMSContinuousLearningService:
-    """Stores confirmed fraud labels in PostgreSQL and Qdrant to improve future detection."""
+    """Stores confirmed fraud labels in PostgreSQL and Pinecone to improve future detection."""
 
     def __init__(self, db: Session):
         self.repository = PhishingRepository(db)

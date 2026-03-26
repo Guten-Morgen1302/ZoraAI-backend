@@ -7,9 +7,9 @@ from typing import Any
 from uuid import uuid4
 
 try:
-    from app.fraud_memory.qdrant_client import QdrantVectorStore, build_qdrant_client
+    from app.fraud_memory.pinecone_client import get_pinecone_vector_store
 except ModuleNotFoundError:
-    from fraud_memory.qdrant_client import QdrantVectorStore, build_qdrant_client
+    from fraud_memory.pinecone_client import get_pinecone_vector_store
 
 from .cleaning import extract_label_from_row, extract_text_from_row
 from .models import TextFraudRecord
@@ -50,11 +50,7 @@ def generate_embedding(text: str) -> list[float]:
 
 class TextScamIngestionPipeline:
     def __init__(self):
-        self.vector_store = QdrantVectorStore(
-            client=build_qdrant_client(),
-            collection_name=COLLECTION_NAME,
-            vector_size=VECTOR_SIZE,
-        )
+        self.vector_store = get_pinecone_vector_store(namespace=COLLECTION_NAME)
 
     def run(self) -> dict[str, int]:
         if not DATA_DIR.exists():

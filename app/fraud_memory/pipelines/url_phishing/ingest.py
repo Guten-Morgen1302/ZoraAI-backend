@@ -6,9 +6,9 @@ from typing import Any
 from uuid import uuid4
 
 try:
-    from app.fraud_memory.qdrant_client import QdrantVectorStore, build_qdrant_client
+    from app.fraud_memory.pinecone_client import get_pinecone_vector_store
 except ModuleNotFoundError:
-    from fraud_memory.qdrant_client import QdrantVectorStore, build_qdrant_client
+    from fraud_memory.pinecone_client import get_pinecone_vector_store
 
 from .cleaning import normalize_label, row_to_text
 from .models import UrlFraudRecord
@@ -48,11 +48,7 @@ def generate_embedding(text: str) -> list[float]:
 
 class UrlPhishingIngestionPipeline:
     def __init__(self):
-        self.vector_store = QdrantVectorStore(
-            client=build_qdrant_client(),
-            collection_name=COLLECTION_NAME,
-            vector_size=VECTOR_SIZE,
-        )
+        self.vector_store = get_pinecone_vector_store(namespace=COLLECTION_NAME)
 
     def run(self) -> dict[str, int]:
         if not DATA_FILE.exists():
