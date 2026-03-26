@@ -354,3 +354,20 @@ class AttachmentAnalysis(Base):
 
     request = relationship("AttachmentRequest", back_populates="analysis")
 
+
+class PortalChat(Base):
+
+    __tablename__ = "portal_chats"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
+
+    title = Column(String, nullable=False, default="New Chat")
+
+    messages = Column(Text, nullable=False, default="[]")
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
