@@ -6,6 +6,9 @@ Installation and Setups
 4. Run check_setup.py
 
 
+pip install soundfile
+pip install audioread
+
 System Overview
 
 The system is a multimodal fraud detection pipeline that performs simultaneous acoustic and linguistic 
