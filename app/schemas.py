@@ -1,4 +1,6 @@
 from typing import Any, Literal
+from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, EmailStr
 from enum import Enum
@@ -23,6 +25,27 @@ class TokenResponse(BaseModel):
 	access_token: str
 	refresh_token: str
 	token_type: str
+
+
+class ApiKeyCreateResponse(BaseModel):
+	key_id: UUID
+	api_key: str
+	expires_at: datetime
+	valid_for_days: int
+
+
+class ApiKeyListItem(BaseModel):
+	key_id: UUID
+	masked_key: str
+	is_active: bool
+	created_at: datetime
+	expires_at: datetime
+
+
+class ApiKeyRevealResponse(BaseModel):
+	key_id: UUID
+	api_key: str
+	expires_at: datetime
 
 
 class MessageSource(str, Enum):

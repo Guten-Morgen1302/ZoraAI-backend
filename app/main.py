@@ -11,6 +11,7 @@ from app.text_analysis.router import router as text_analysis_router
 from app.url_analysis.router import router as url_analysis_router
 from app.attachment_sandbox.router import router as attachment_router
 from app.voice_analysis.router import router as voice_analysis_router
+from app.api_keys.router import router as api_keys_router
 from app.middleware.auth_logging import AuthLoggingMiddleware
 
 
@@ -43,6 +44,7 @@ app.include_router(text_analysis_router)
 app.include_router(url_analysis_router)
 app.include_router(attachment_router)
 app.include_router(voice_analysis_router)
+app.include_router(api_keys_router)
 
 @app.get("/")
 def home():
