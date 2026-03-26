@@ -288,6 +288,47 @@ def get_url_history_detail(request_id: str, request: Request, db: Session = Depe
     return URLAnalyzeResponse(**parsed_result)
 
 
+@router.delete("/history/{request_id}", status_code=status.HTTP_200_OK)
+def delete_url_history_item(request_id: str, request: Request, db: Session = Depends(get_db)):
+    user_id = _safe_user_uuid(request)
+
+    try:
+        request_uuid = uuid.UUID(request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request_id") from exc
+
+    query = db.query(URLAnalysisRequest).filter(URLAnalysisRequest.id == request_uuid)
+    if user_id is not None:
+        query = query.filter(URLAnalysisRequest.user_id == user_id)
+
+    request_row = query.first()
+    if not request_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL analysis not found")
+
+    db.query(URLThreatResult).filter(URLThreatResult.request_id == request_uuid).delete(synchronize_session=False)
+    db.query(URLAnalysisRequest).filter(URLAnalysisRequest.id == request_uuid).delete(synchronize_session=False)
+    db.commit()
+    return {"status": "deleted", "request_id": request_id}
+
+
+@router.delete("/history", status_code=status.HTTP_200_OK)
+def clear_url_history(request: Request, db: Session = Depends(get_db)):
+    user_id = _safe_user_uuid(request)
+
+    base_query = db.query(URLAnalysisRequest.id)
+    if user_id is not None:
+        base_query = base_query.filter(URLAnalysisRequest.user_id == user_id)
+
+    request_ids = [row[0] for row in base_query.all()]
+    if not request_ids:
+        return {"status": "cleared", "deleted": 0}
+
+    db.query(URLThreatResult).filter(URLThreatResult.request_id.in_(request_ids)).delete(synchronize_session=False)
+    deleted_count = db.query(URLAnalysisRequest).filter(URLAnalysisRequest.id.in_(request_ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"status": "cleared", "deleted": int(deleted_count or 0)}
+
+
 @router.post("/analyze", response_model=URLAnalyzeResponse, status_code=status.HTTP_200_OK)
 async def analyze_url(payload: URLAnalyzeRequest, request: Request, db: Session = Depends(get_db)):
     try:

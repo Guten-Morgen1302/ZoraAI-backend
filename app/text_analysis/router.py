@@ -211,6 +211,50 @@ def get_sms_history_detail(request_id: str, request: Request, db: Session = Depe
     return _normalize_sms_history_payload(req, threat)
 
 
+@router.delete("/sms/history/{request_id}", status_code=status.HTTP_200_OK)
+def delete_sms_history_item(request_id: str, request: Request, db: Session = Depends(get_db)):
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+
+    try:
+        request_uuid = UUID(request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request_id") from exc
+
+    query = db.query(PhishingRequestModel).filter(
+        PhishingRequestModel.id == request_uuid,
+        PhishingRequestModel.source == "sms",
+    )
+    if user_id:
+        query = query.filter(PhishingRequestModel.user_id == user_id)
+
+    request_row = query.first()
+    if not request_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SMS analysis not found")
+
+    db.query(SmsThreatResult).filter(SmsThreatResult.request_id == request_uuid).delete(synchronize_session=False)
+    db.query(PhishingRequestModel).filter(PhishingRequestModel.id == request_uuid).delete(synchronize_session=False)
+    db.commit()
+    return {"status": "deleted", "request_id": request_id}
+
+
+@router.delete("/sms/history", status_code=status.HTTP_200_OK)
+def clear_sms_history(request: Request, db: Session = Depends(get_db)):
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+
+    base_query = db.query(PhishingRequestModel.id).filter(PhishingRequestModel.source == "sms")
+    if user_id:
+        base_query = base_query.filter(PhishingRequestModel.user_id == user_id)
+
+    request_ids = [row[0] for row in base_query.all()]
+    if not request_ids:
+        return {"status": "cleared", "deleted": 0}
+
+    db.query(SmsThreatResult).filter(SmsThreatResult.request_id.in_(request_ids)).delete(synchronize_session=False)
+    deleted_count = db.query(PhishingRequestModel).filter(PhishingRequestModel.id.in_(request_ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"status": "cleared", "deleted": int(deleted_count or 0)}
+
+
 @router.get("/email/history", status_code=status.HTTP_200_OK)
 def get_email_history(request: Request, db: Session = Depends(get_db)):
     user_id = request.state.user_id if hasattr(request.state, "user_id") else None
@@ -273,6 +317,50 @@ def get_email_history_detail(request_id: str, request: Request, db: Session = De
 
     req, threat = row
     return _normalize_email_history_payload(req, threat)
+
+
+@router.delete("/email/history/{request_id}", status_code=status.HTTP_200_OK)
+def delete_email_history_item(request_id: str, request: Request, db: Session = Depends(get_db)):
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+
+    try:
+        request_uuid = UUID(request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request_id") from exc
+
+    query = db.query(PhishingRequestModel).filter(
+        PhishingRequestModel.id == request_uuid,
+        PhishingRequestModel.source == "email",
+    )
+    if user_id:
+        query = query.filter(PhishingRequestModel.user_id == user_id)
+
+    request_row = query.first()
+    if not request_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email analysis not found")
+
+    db.query(EmailThreatResult).filter(EmailThreatResult.request_id == request_uuid).delete(synchronize_session=False)
+    db.query(PhishingRequestModel).filter(PhishingRequestModel.id == request_uuid).delete(synchronize_session=False)
+    db.commit()
+    return {"status": "deleted", "request_id": request_id}
+
+
+@router.delete("/email/history", status_code=status.HTTP_200_OK)
+def clear_email_history(request: Request, db: Session = Depends(get_db)):
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+
+    base_query = db.query(PhishingRequestModel.id).filter(PhishingRequestModel.source == "email")
+    if user_id:
+        base_query = base_query.filter(PhishingRequestModel.user_id == user_id)
+
+    request_ids = [row[0] for row in base_query.all()]
+    if not request_ids:
+        return {"status": "cleared", "deleted": 0}
+
+    db.query(EmailThreatResult).filter(EmailThreatResult.request_id.in_(request_ids)).delete(synchronize_session=False)
+    deleted_count = db.query(PhishingRequestModel).filter(PhishingRequestModel.id.in_(request_ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"status": "cleared", "deleted": int(deleted_count or 0)}
 
 
 def _truncate_body_preview(body: str, max_chars: int = 180) -> str:
