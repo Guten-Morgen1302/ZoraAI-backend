@@ -5,7 +5,7 @@ import torch
 device = "cuda" if torch.cuda.is_available() else "cpu"
 compute_type = "float16" if device == "cuda" else "int8"
 
-model = WhisperModel("small", device=device, compute_type=compute_type)
+model = WhisperModel("tiny", device=device, compute_type=compute_type)
 
 def get_transcript(audio_path_or_bytes):
     print("Running Whisper Transcription")

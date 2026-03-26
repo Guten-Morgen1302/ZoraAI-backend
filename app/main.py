@@ -11,6 +11,7 @@ from app.text_analysis.router import router as text_analysis_router
 from app.url_analysis.router import router as url_analysis_router
 from app.attachment.router import router as attachment_router
 from app.voice_analysis.router import router as voice_analysis_router
+from app.voice_analysis.websocket_router import ws_router as voice_ws_router
 from app.middleware.auth_logging import AuthLoggingMiddleware
 from app.ai_security.middleware import ShadowGuardMiddleware
 
@@ -23,7 +24,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://mail.google.com"],
+    allow_origins=["https://mail.google.com", "http://localhost:3000", "http://127.0.0.1:3000"],
     allow_origin_regex=r"chrome-extension://.*",
     allow_credentials=True,
     allow_methods=["*"],
@@ -45,6 +46,7 @@ app.include_router(text_analysis_router)
 app.include_router(url_analysis_router)
 app.include_router(attachment_router)
 app.include_router(voice_analysis_router)
+app.include_router(voice_ws_router)
 
 @app.get("/")
 def home():

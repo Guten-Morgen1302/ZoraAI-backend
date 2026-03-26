@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, UploadFile, File
+from fastapi.responses import JSONResponse
+from app.ai_security.guard import is_prompt_injection
 
 # Custom modules
 from app.voice_analysis.src.transcription import get_transcript
