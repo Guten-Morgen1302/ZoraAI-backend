@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas import (
+    EmailFeedbackRequest,
+    EmailFeedbackResponse,
+    EmailFeedbackRetrainRequest,
+    EmailFeedbackRetrainResponse,
     EmailAnalyzeByIdRequest,
     EmailAnalyzeManualRequest,
     LatestEmailFetchRequest,
@@ -50,6 +54,7 @@ from app.text_analysis.service import (
     TextAnalysisService,
 )
 from app.text_analysis.sms_analyzer.feeback_mechanism.sms_feedback_service import SMSFeedbackService
+from app.text_analysis.email_analyzer.feeback_mechanism.email_feedback_service import EmailFeedbackService
 from app.auth.security import get_token_subject
 from app.models import SmsThreatResult, EmailThreatResult, PhishingRequest as PhishingRequestModel
 
@@ -124,6 +129,7 @@ def _normalize_email_history_payload(req: PhishingRequestModel, threat: EmailThr
             body = parts[1].strip() if len(parts) > 1 else ""
 
     return LatestEmailAnalyzeResponse(
+        request_id=req.id,
         message_id=str(parsed_result.get("message_id") or str(req.id)),
         thread_id=parsed_result.get("thread_id"),
         sender=sender,
@@ -350,6 +356,7 @@ def _run_email_full_analysis(
     )
 
     response_payload = {
+        "request_id": str(phishing_request.id),
         "message_id": message_id,
         "thread_id": thread_id,
         "sender": sender,
@@ -376,6 +383,7 @@ def _run_email_full_analysis(
     db.commit()
 
     return LatestEmailAnalyzeResponse(
+        request_id=phishing_request.id,
         message_id=message_id,
         thread_id=thread_id,
         sender=sender,
@@ -534,6 +542,59 @@ def retrain_from_sms_feedback(payload: SMSFeedbackRetrainRequest, db: Session = 
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
     return SMSFeedbackRetrainResponse(
+        status="completed",
+        candidate_feedback=result.candidate_feedback,
+        exported_rows=result.exported_rows,
+        csv_path=result.csv_path,
+        namespace=result.namespace,
+        vectors_inserted=result.vectors_inserted,
+        vectors_skipped=result.vectors_skipped,
+    )
+
+
+@router.post("/email/feeback", response_model=EmailFeedbackResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/email/feedback", response_model=EmailFeedbackResponse, status_code=status.HTTP_201_CREATED)
+def submit_email_feedback(payload: EmailFeedbackRequest, db: Session = Depends(get_db)):
+    service = EmailFeedbackService(db)
+    try:
+        result = service.submit_feedback(
+            analysis_id=payload.analysis_id,
+            source=payload.source,
+            human_label=payload.human_label,
+            model_prediction=payload.model_prediction,
+            model_confidence=payload.model_confidence,
+            feedback_type=payload.feedback_type,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    return EmailFeedbackResponse(
+        id=result.id,
+        analysis_id=result.analysis_id,
+        input_hash=result.input_hash,
+        status="stored",
+        created_at=result.created_at,
+    )
+
+
+@router.post("/email/retrain/feedback", response_model=EmailFeedbackRetrainResponse, status_code=status.HTTP_200_OK)
+def retrain_from_email_feedback(payload: EmailFeedbackRetrainRequest, db: Session = Depends(get_db)):
+    service = EmailFeedbackService(db)
+    try:
+        result = service.export_retraining_dataset_and_upsert(
+            max_records=payload.max_records,
+            namespace=payload.namespace,
+            batch_size=payload.batch_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (RuntimeError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    return EmailFeedbackRetrainResponse(
         status="completed",
         candidate_feedback=result.candidate_feedback,
         exported_rows=result.exported_rows,

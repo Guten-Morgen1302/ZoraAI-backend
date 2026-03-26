@@ -147,6 +147,7 @@ class EmailAnalyzeManualRequest(BaseModel):
 
 
 class LatestEmailAnalyzeResponse(BaseModel):
+	request_id: UUID | None = None
 	message_id: str
 	thread_id: str | None = None
 	sender: str
@@ -269,6 +270,51 @@ class SMSFeedbackRetrainRequest(BaseModel):
 
 
 class SMSFeedbackRetrainResponse(BaseModel):
+	status: str
+	candidate_feedback: int
+	exported_rows: int
+	csv_path: str
+	namespace: str
+	vectors_inserted: int
+	vectors_skipped: int
+
+
+class EmailFeedbackLabel(str, Enum):
+	phishing = "phishing"
+	genuine = "genuine"
+
+
+class EmailFeedbackType(str, Enum):
+	correct = "correct"
+	incorrect = "incorrect"
+	modified = "modified"
+
+
+class EmailFeedbackRequest(BaseModel):
+	analysis_id: str = Field(min_length=1, max_length=128)
+	source: Literal["email"] = "email"
+	human_label: EmailFeedbackLabel
+	model_prediction: str = Field(min_length=1, max_length=64)
+	model_confidence: float = Field(ge=0.0, le=1.0)
+	feedback_type: EmailFeedbackType
+	notes: str | None = Field(default=None, max_length=2000)
+
+
+class EmailFeedbackResponse(BaseModel):
+	id: int
+	analysis_id: str
+	input_hash: str
+	status: str
+	created_at: str
+
+
+class EmailFeedbackRetrainRequest(BaseModel):
+	max_records: int | None = Field(default=None, ge=1, le=50000)
+	namespace: str = Field(default="fraud_emails", min_length=1, max_length=128)
+	batch_size: int = Field(default=128, ge=1, le=1000)
+
+
+class EmailFeedbackRetrainResponse(BaseModel):
 	status: str
 	candidate_feedback: int
 	exported_rows: int

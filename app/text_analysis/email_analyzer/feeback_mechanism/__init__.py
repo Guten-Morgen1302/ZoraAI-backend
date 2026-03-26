@@ -1,0 +1,1 @@
+"""Email feedback mechanism package."""
