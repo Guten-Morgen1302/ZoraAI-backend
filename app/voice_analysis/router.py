@@ -8,6 +8,9 @@ import logging
 import uuid
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from fastapi import APIRouter, UploadFile, File
+from fastapi.responses import JSONResponse
+from app.ai_security.guard import is_prompt_injection
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
