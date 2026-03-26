@@ -250,7 +250,7 @@ class AttachmentRequest(Base):
 
     file_size = Column(Integer, nullable=False, default=0)
 
-    s3_url = Column(Text, nullable=False)
+    s3_url = Column(Text, nullable=True)
 
     status = Column(String, nullable=False, default="uploaded")
 
