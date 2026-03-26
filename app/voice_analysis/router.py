@@ -8,6 +8,9 @@ import logging
 import uuid
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from fastapi import APIRouter, UploadFile, File
+from fastapi.responses import JSONResponse
+from app.ai_security.guard import is_prompt_injection
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
@@ -229,6 +232,59 @@ def get_voice_history_detail(request_id: str, request: Request, db: Session = De
 
     req, analysis = row
     return _normalize_history_analysis_payload(req, analysis)
+
+
+@router.delete("/history/{request_id}", status_code=status.HTTP_200_OK)
+def delete_voice_history_item(request_id: str, request: Request, db: Session = Depends(get_db)):
+    user_id_value = getattr(request.state, "user_id", None)
+    user_id = None
+    if user_id_value:
+        try:
+            user_id = uuid.UUID(str(user_id_value))
+        except ValueError:
+            pass
+
+    try:
+        req_uuid = uuid.UUID(request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request_id") from exc
+
+    query = db.query(VoiceRequest).filter(VoiceRequest.id == req_uuid)
+    if user_id:
+        query = query.filter(VoiceRequest.user_id == user_id)
+
+    request_row = query.first()
+    if not request_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Voice analysis not found")
+
+    db.query(VoiceAnalysis).filter(VoiceAnalysis.request_id == req_uuid).delete(synchronize_session=False)
+    db.query(VoiceRequest).filter(VoiceRequest.id == req_uuid).delete(synchronize_session=False)
+    db.commit()
+    return {"status": "deleted", "request_id": request_id}
+
+
+@router.delete("/history", status_code=status.HTTP_200_OK)
+def clear_voice_history(request: Request, db: Session = Depends(get_db)):
+    user_id_value = getattr(request.state, "user_id", None)
+    user_id = None
+    if user_id_value:
+        try:
+            user_id = uuid.UUID(str(user_id_value))
+        except ValueError:
+            pass
+
+    base_query = db.query(VoiceRequest.id)
+    if user_id:
+        base_query = base_query.filter(VoiceRequest.user_id == user_id)
+
+    request_ids = [row[0] for row in base_query.all()]
+    if not request_ids:
+        return {"status": "cleared", "deleted": 0}
+
+    db.query(VoiceAnalysis).filter(VoiceAnalysis.request_id.in_(request_ids)).delete(synchronize_session=False)
+    deleted_count = db.query(VoiceRequest).filter(VoiceRequest.id.in_(request_ids)).delete(synchronize_session=False)
+    db.commit()
+    return {"status": "cleared", "deleted": int(deleted_count or 0)}
 
 
 # Main Endpoint

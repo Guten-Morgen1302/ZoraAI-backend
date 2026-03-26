@@ -1,0 +1,44 @@
+# Garak Red-Team Configuration for ZoraAI
+# ===========================================
+# These configs tell Garak how to fire adversarial payloads into your API.
+#
+# Usage:
+#   garak --model_type rest --model_name "ZoraAI-Email" --generator_config garak_config.yaml --probes promptinject,jailbreak,continuation
+#
+# NOTE: The Shadow Guard uses a *local* Phi-3 model (via Ollama) to screen
+# requests BEFORE they hit the main LLM. The main LLMs are:
+#   - Email analyzer: Gemini 2.0 Flash via OpenRouter
+#   - SMS analyzer:   Llama 3.2 via local Ollama
+#   - Voice analyzer: Llama 3.2 via local Ollama
+#
+# The guard protects all three regardless of which LLM backs them.
+
+# --- Email endpoint (Gemini/OpenRouter backed) ---
+rest.RestGenerator:
+  name: "ZoraAI-Email"
+  uri: "http://localhost:8000/text/email/analyze/extension"
+  method: "POST"
+  req_template_json_object:
+    body: "$INPUT"
+    sender: "attacker@red-team.test"
+    subject: "Red Team Probe"
+    with_llm_explanation: true
+  response_json: true
+  response_objects_at: ["llm_explanation"]
+
+# --- SMS endpoint (Ollama/Llama 3.2 backed) ---
+# To use this config, run garak with --model_name "ZoraAI-SMS"
+# rest.RestGenerator:
+#   name: "ZoraAI-SMS"
+#   uri: "http://localhost:8000/text/sms/analyze"
+#   method: "POST"
+#   req_template_json_object:
+#     text: "$INPUT"
+#     include_llm_explanation: true
+#   response_json: true
+#   response_objects_at: ["llm_explanation"]
+
+# --- Voice endpoint ---
+# Voice uses file upload (multipart), not JSON. Garak's REST generator
+# doesn't natively support file uploads, so use the red_team_harness.py
+# script for voice testing instead.
