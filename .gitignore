@@ -18,3 +18,4 @@ app/text_analysis/email_analyzer/gmail_client_secrets.json
 frontend/
 todos.txt
 app/url_analysis/explanations/
+packages/

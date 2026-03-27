@@ -47,6 +47,7 @@ app.include_router(text_analysis_router)
 app.include_router(url_analysis_router)
 app.include_router(attachment_router)
 app.include_router(voice_analysis_router)
+app.include_router(api_keys_router)
 
 @app.get("/")
 def home():

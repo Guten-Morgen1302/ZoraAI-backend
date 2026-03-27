@@ -18,7 +18,6 @@ from app.text_analysis.threat_scoring import score_sms_threat
 
 DEFAULT_SIMILARITY_TOP_K = 3
 DEFAULT_SIMILARITY_THRESHOLD = 0.82
-AUTO_PINECONE_UPSERT_CONFIDENCE_THRESHOLD = 0.85
 
 logger = logging.getLogger("zora.text_analysis.service")
 
@@ -95,56 +94,6 @@ class SMSFraudAnalysisService:
         self.repository = PhishingRepository(db)
         self.db = db
         self.pipeline = pipeline or TextPreprocessingPipeline()
-        self.embedding_service = get_embedding_service()
-
-    @staticmethod
-    def _normalize_probability(raw_confidence: float | int | str | None) -> float:
-        try:
-            confidence_value = float(raw_confidence)
-        except (TypeError, ValueError):
-            return 0.0
-
-        if confidence_value > 1.0:
-            confidence_value = confidence_value / 100.0
-
-        return max(0.0, min(1.0, confidence_value))
-
-    def _auto_store_high_confidence_prediction(
-        self,
-        *,
-        request_id: str,
-        text: str,
-        prediction: dict,
-    ) -> None:
-        normalized_confidence = self._normalize_probability(prediction.get("confidence"))
-        if normalized_confidence < AUTO_PINECONE_UPSERT_CONFIDENCE_THRESHOLD:
-            return
-
-        label = str(prediction.get("label") or "unknown").strip().lower()
-        if not label:
-            label = "unknown"
-
-        try:
-            vector_result = self.embedding_service.store_embedding(text=text, fraud_label=label)
-            logger.info(
-                "Auto-upserted SMS prediction to Pinecone",
-                extra={
-                    "request_id": request_id,
-                    "vector_id": vector_result.get("id"),
-                    "label": label,
-                    "confidence": round(normalized_confidence, 4),
-                },
-            )
-        except Exception as exc:  # noqa: BLE001 - never fail core analysis on memory sync issues
-            logger.warning(
-                "Failed to auto-upsert high-confidence SMS to Pinecone",
-                extra={
-                    "request_id": request_id,
-                    "label": label,
-                    "confidence": round(normalized_confidence, 4),
-                    "error": str(exc),
-                },
-            )
 
     @staticmethod
     def _fallback_stylometry_score(urgency_score: float, url_risk_score: float) -> dict[str, float]:
@@ -247,11 +196,6 @@ class SMSFraudAnalysisService:
             result=json.dumps(result_payload),
             prediction=json.dumps(prediction),
             explanation=scoring.explanation,
-        )
-        self._auto_store_high_confidence_prediction(
-            request_id=str(phishing_request.id),
-            text=cleaned_text,
-            prediction=prediction,
         )
         self.db.commit()
 
