@@ -1,0 +1,15 @@
+{
+  "new_rows": 1410,
+  "old_rows_available": 15252,
+  "old_rows_replayed": 493,
+  "final_rows": 1903,
+  "label_distribution": {
+    "1": 952,
+    "0": 951
+  },
+  "best_val_f1": 1.0,
+  "model_source": "/content/sms_model.zip_unzipped",
+  "output_dir": "/content/sms_model_updated",
+  "old_data": "/content/final_merged_sms_dataset.csv",
+  "new_data": "/content/scam_data_new.csv"
+}
