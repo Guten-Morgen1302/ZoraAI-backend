@@ -11,6 +11,10 @@ _SUSPICIOUS_URL_PATTERN = re.compile(
     r"https?://[^\s/]+\.(?:ru|cn|tk|top|xyz|pw|cc|ws)\b",
     re.IGNORECASE,
 )
+_URL_EXTRACT_PATTERN = re.compile(
+    r"https?://[^\s\"'<>()[\]{}]+",
+    re.IGNORECASE,
+)
 
 
 def _zeroed_pdf_features() -> dict[str, Any]:
@@ -21,6 +25,8 @@ def _zeroed_pdf_features() -> dict[str, Any]:
         "has_embedded_files": False,
         "has_launch_action": False,
         "has_suspicious_urls": False,
+        "extracted_urls": [],
+        "extracted_url_count": 0,
     }
 
 
@@ -58,6 +64,19 @@ def extract_pdf_features(file_path: str) -> dict[str, Any]:
         features["has_suspicious_urls"] = bool(
             _SUSPICIOUS_URL_PATTERN.search(raw_text)
         )
+
+        extracted_urls: list[str] = []
+        seen_urls: set[str] = set()
+        for match in _URL_EXTRACT_PATTERN.findall(raw_text):
+            cleaned = match.rstrip("),.;\"'")
+            if cleaned and cleaned not in seen_urls:
+                seen_urls.add(cleaned)
+                extracted_urls.append(cleaned)
+            if len(extracted_urls) >= 25:
+                break
+
+        features["extracted_urls"] = extracted_urls
+        features["extracted_url_count"] = len(extracted_urls)
 
     except ImportError as exc:
         logger.warning("PDF parser dependency unavailable for %s: %s", file_path, exc)

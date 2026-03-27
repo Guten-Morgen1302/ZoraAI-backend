@@ -31,6 +31,28 @@ class User(Base):
 
     voice_requests = relationship("VoiceRequest", back_populates="user")
     attachment_requests = relationship("AttachmentRequest", back_populates="user")
+    api_keys = relationship("ApiKey", back_populates="user")
+
+
+class ApiKey(Base):
+
+    __tablename__ = "api_keys"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+
+    api_key = Column(String, unique=True, nullable=False, index=True)
+
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    expires_at = Column(DateTime, nullable=False)
+
+    revoked_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="api_keys")
 
 
 class PhishingRequest(Base):
@@ -331,4 +353,21 @@ class AttachmentAnalysis(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     request = relationship("AttachmentRequest", back_populates="analysis")
+
+
+class PortalChat(Base):
+
+    __tablename__ = "portal_chats"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
+
+    title = Column(String, nullable=False, default="New Chat")
+
+    messages = Column(Text, nullable=False, default="[]")
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

@@ -1,4 +1,6 @@
 from typing import Any, Literal
+from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, EmailStr
 from enum import Enum
@@ -23,6 +25,27 @@ class TokenResponse(BaseModel):
 	access_token: str
 	refresh_token: str
 	token_type: str
+
+
+class ApiKeyCreateResponse(BaseModel):
+	key_id: UUID
+	api_key: str
+	expires_at: datetime
+	valid_for_days: int
+
+
+class ApiKeyListItem(BaseModel):
+	key_id: UUID
+	masked_key: str
+	is_active: bool
+	created_at: datetime
+	expires_at: datetime
+
+
+class ApiKeyRevealResponse(BaseModel):
+	key_id: UUID
+	api_key: str
+	expires_at: datetime
 
 
 class MessageSource(str, Enum):
@@ -351,3 +374,30 @@ class URLFeedbackResponse(BaseModel):
 	analysis_id: str
 	status: str
 	created_at: str
+
+
+class PortalChatCreateRequest(BaseModel):
+	title: str | None = Field(default=None, max_length=200)
+	messages: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PortalChatUpdateRequest(BaseModel):
+	title: str | None = Field(default=None, max_length=200)
+	messages: list[dict[str, Any]] | None = None
+
+
+class PortalChatListItem(BaseModel):
+	id: UUID
+	title: str
+	created_at: datetime
+	updated_at: datetime
+	message_count: int
+	preview: str | None = None
+
+
+class PortalChatDetailResponse(BaseModel):
+	id: UUID
+	title: str
+	created_at: datetime
+	updated_at: datetime
+	messages: list[dict[str, Any]] = Field(default_factory=list)

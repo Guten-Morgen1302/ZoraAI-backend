@@ -25,6 +25,10 @@ _POWERSHELL_PATTERN = re.compile(
 _BASE64_PATTERN = re.compile(
     r"[A-Za-z0-9+/]{40,}={0,2}"
 )
+_HTTP_URL_PATTERN = re.compile(
+    r"https?://[^\s\"'<>()[\]{}]+",
+    re.IGNORECASE,
+)
 
 
 def compute_entropy(data: bytes) -> float:
@@ -60,6 +64,8 @@ def extract_base_features(file_path: str) -> dict[str, Any]:
         "has_registry_keys": False,
         "has_powershell": False,
         "has_base64_blob": False,
+        "extracted_urls": [],
+        "extracted_url_count": 0,
     }
 
     try:
@@ -78,6 +84,20 @@ def extract_base_features(file_path: str) -> dict[str, Any]:
         result["has_registry_keys"] = bool(_REGISTRY_PATTERN.search(joined_strings))
         result["has_powershell"] = bool(_POWERSHELL_PATTERN.search(joined_strings))
         result["has_base64_blob"] = bool(_BASE64_PATTERN.search(joined_strings))
+
+        # Keep a compact list for downstream URL pipeline fan-out in the portal.
+        extracted_urls: list[str] = []
+        seen_urls: set[str] = set()
+        for match in _HTTP_URL_PATTERN.findall(joined_strings):
+            cleaned = match.rstrip("),.;\"'")
+            if cleaned and cleaned not in seen_urls:
+                seen_urls.add(cleaned)
+                extracted_urls.append(cleaned)
+            if len(extracted_urls) >= 20:
+                break
+
+        result["extracted_urls"] = extracted_urls
+        result["extracted_url_count"] = len(extracted_urls)
 
     except Exception:
         logger.exception("Failed to extract base features from %s", file_path)
