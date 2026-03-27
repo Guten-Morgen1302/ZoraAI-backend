@@ -2,7 +2,6 @@
 .venv/
 venv/
 app/fraud_memory/data
-app/text_analysis/sms_analyzer/sms_model
 **app/__pycache__/
 __pycache__/
 .vscode/
@@ -13,7 +12,6 @@ malware_scan/
 *.py[cod]
 *.pyo
 
-app/text_analysis/email_analyzer/email_model
 app/text_analysis/email_analyzer/gmail_client_secrets.json
 frontend/
 todos.txt
