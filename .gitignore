@@ -17,4 +17,4 @@ frontend/
 todos.txt
 app/url_analysis/explanations/
 packages/
-app/text_analysis/email_analyzer/email_model
+app/text_analysis/email_analyzer/email_model/*
