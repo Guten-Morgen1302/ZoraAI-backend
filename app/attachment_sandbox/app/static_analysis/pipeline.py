@@ -21,7 +21,14 @@ def run_static_pipeline(file_path: str) -> Dict[str, Any]:
     yara_hits = scan_yara(file_path)
     
     # ── Stage 2: ClamAV Scan ─────────────────────────────────────────────────
+    logger.info("Stage 2/3: Calling ClamAV scan for %s", file_path)
     clamav_is_malicious, clamav_signature = scan_clamav(file_path)
+    logger.info(
+        "Stage 2/3: ClamAV completed for %s | flagged=%s | signature=%s",
+        file_path,
+        clamav_is_malicious,
+        clamav_signature,
+    )
     
     # ── Stage 3: EMBER Machine Learning ──────────────────────────────────────
     ml_score, extracted_features = predict(file_path)
