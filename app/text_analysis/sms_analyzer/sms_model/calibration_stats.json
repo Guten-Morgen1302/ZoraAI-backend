@@ -1,0 +1,14 @@
+{
+  "updated_at": "2026-03-25T20:34:23.602602+00:00",
+  "total_predictions": 5,
+  "average_abs_delta": 0.034048,
+  "cumulative_abs_delta": 0.17024,
+  "ema_abs_delta": 0.008069,
+  "drift_threshold": 0.2,
+  "drift_alert": false,
+  "last_raw_confidence": 0.863574,
+  "last_calibrated_confidence": 0.760115,
+  "temperature": 1.6,
+  "platt_a": 1.0,
+  "platt_b": 0.0
+}
