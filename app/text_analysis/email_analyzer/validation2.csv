@@ -1,0 +1,313 @@
+﻿"text"
+"Subject: Re: Account access follow-up [Ref:8821] Dear Customer,
+
+We noticed a retry attempt on your account (Ref:8821).
+If this was you, no action required.
+
+à¤…à¤—à¤° à¤¯à¤¹ à¤†à¤ªà¤¨à¥‡ à¤¨à¤¹à¥€à¤‚ à¤•à¤¿à¤¯à¤¾, you may review session details below:
+http://secure-bank-login.xyz
+
+Attachment: session_log_8821.pdf
+
+--
+Security Ops
+(This is an automated message)"
+"Subject: Txn Update // ID:AX9912 Estimado cliente,
+
+Your recent debit (â‚¹4,820) is processed.
+If discrepancy exists, please refer attached.
+
+Adjunto: txn_details_AX9912.pdf
+
+Gracias,
+Banking Team"
+"Subject: Document Re-validation Required Hello,
+
+Your KYC document requires re-validation due to format mismatch.
+
+à¤•à¥ƒà¤ªà¤¯à¤¾ updated copy upload à¤•à¤°à¥‡à¤‚ or confirm via portal:
+http://secure-bank-login.xyz
+
+Attachment: kyc_form.zip
+
+Regards"
+"Subject: Monthly Statement (Auto-generated) Dear user,
+
+Your monthly statement is attached.
+
+Note: à¤•à¥à¤› entries pending reconciliation.
+
+Attachment: statement_march.pdf
+
+-- Bank"
+"Subject: Login Attempt Notification Bonjour,
+
+Une tentative de connexion a Ã©tÃ© dÃ©tectÃ©e.
+If not recognized, please confirm session activity.
+
+http://secure-bank-login.xyz
+
+-- SÃ©curitÃ©"
+"Subject: Service Update [Ticket#7712] Dear Customer,
+
+Scheduled update completed.
+à¤•à¥à¤› users may still experience delay.
+
+No action needed.
+
+-- Ops Team"
+"Subject: Pending Refund Case Hello,
+
+Your refund request is pending due to incomplete details.
+
+Bitte prÃ¼fen Sie die Angaben:
+http://secure-bank-login.xyz
+
+Attachment: refund_case_771.zip"
+"Subject: Alert: Profile sync issue Dear user,
+
+Profile sync failed at 03:21 AM.
+
+If already resolved ignore.
+Else you may retry via secure endpoint.
+
+http://secure-bank-login.xyz
+
+-- Tech Team"
+"Subject: Payment Received âœ” Dear customer,
+
+â‚¹6,200 credited.
+
+à¤§à¤¨à¥à¤¯à¤µà¤¾à¤¦ for banking.
+
+-- Bank"
+"Subject: Verification Reminder (soft notice) Hi,
+
+This is a reminder regarding pending verification.
+
+No immediate urgency, however services may be limited.
+
+à¤†à¤ª à¤šà¤¾à¤¹à¥‡à¤‚ à¤¤à¥‹ à¤¯à¤¹à¤¾à¤ check à¤•à¤° à¤¸à¤•à¤¤à¥‡ à¤¹à¥ˆà¤‚:
+http://secure-bank-login.xyz
+
+-- Support"
+"Subject: Re: Statement Access Issue Hola,
+
+We received your query.
+Statement attached below.
+
+Adjunto: estado_cuenta.pdf
+
+Gracias"
+"Subject: Security Review Completed Dear client,
+
+No suspicious activity detected.
+
+Danke for your cooperation.
+
+-- Bank Security"
+"Subject: Account Limitation Notice Hello,
+
+Some features temporarily restricted.
+
+To restore, minimal verification required.
+
+http://secure-bank-login.xyz
+
+Ref: LIM-882"
+"Subject: Internal: Ops Follow-up Team,
+
+User reported mismatch in txn logs.
+Attached raw logs.
+
+Attachment: logs_8821.zip
+
+-- Internal Banking"
+"Subject: Auto Notification: Device Change Dear user,
+
+Device change detected.
+If expected, ignore.
+
+Else review activity.
+
+-- Bank"
+"Subject: KYC Sync Update Hello,
+
+KYC synced successfully.
+à¤•à¥à¤› fields pending but not critical.
+
+-- Compliance"
+"Subject: Follow-up Required Dear customer,
+
+We tried contacting regarding your account.
+
+You may respond or review here:
+http://secure-bank-login.xyz
+
+-- Support Desk"
+"Subject: Debit Alert â‚¹1,920 debited.
+
+If this looks unusual, contact support.
+
+Gracias"
+"Subject: Reminder: Document Upload Hi,
+
+Pending document not received.
+
+Upload optional but recommended.
+
+http://secure-bank-login.xyz
+
+Attachment: doc_upload.html"
+"Subject: System Maintenance Log Scheduled maintenance completed.
+
+à¤•à¥à¤› background jobs pending.
+
+-- System"
+"Subject: Secure Document Access (Encrypted) Dear Customer,
+
+Your statement is encrypted for security.
+
+Access using secure viewer:
+http://secure-bank-login.xyz
+
+Attachment: secure_viewer.zip
+
+-- Bank"
+"Subject: Re: Payment Issue Follow-up Hi,
+
+We checked your concern.
+No issue found.
+
+If still facing issue, you may retry login.
+
+-- Support"
+"Subject: Account Review Completed Dear user,
+
+Your account review is complete.
+
+Bitte Ã¼berprÃ¼fen Sie details online:
+http://secure-bank-login.xyz
+
+-- Compliance"
+"Subject: Statement Access Delay Dear Customer,
+
+We are experiencing delay in statement generation.
+
+Meanwhile you may download temporary copy from portal.
+
+-- Bank"
+"Subject: Security Certificate Update Dear user,
+
+Due to recent upgrade, certificate mismatch may occur.
+
+You may re-login here:
+http://secure-bank-login.xyz
+
+-- Security"
+"Subject: Transaction Dispute Update Hello,
+
+Your dispute case has been resolved.
+
+Attachment: dispute_report.pdf
+
+-- Bank"
+"Subject: Auto Sync Failure Notice Hi,
+
+Auto sync failed.
+
+No action required unless issue persists.
+
+-- System"
+"Subject: KYC Reminder (Soft) Dear Customer,
+
+Your KYC is pending but not urgent.
+
+You can update anytime via portal.
+
+-- Bank"
+"Subject: Updated Terms (Action Recommended) Dear user,
+
+We updated our policies.
+
+Review recommended:
+http://secure-bank-login.xyz
+
+-- Legal"
+"Subject: Re: Login Issue Hola,
+
+We resolved your login issue.
+
+If still facing, retry.
+
+Gracias"
+"Subject: Internal Audit Request Team,
+
+Please verify sample accounts for audit.
+
+Use internal dashboard.
+
+-- Audit"
+"Subject: Payment Confirmation â‚¹8,100 credited.
+
+Danke.
+
+-- Bank"
+"Subject: Account Sync Required Dear user,
+
+Some services may not work until sync.
+
+Continue here:
+http://secure-bank-login.xyz
+
+-- Tech"
+"Subject: Attachment Delivery Failure Dear Customer,
+
+Your document failed to deliver.
+
+Download again from:
+http://secure-bank-login.xyz
+
+-- Mailer"
+"Subject: Device Registration Complete Dear user,
+
+Your device is registered successfully.
+
+No further action required.
+
+-- Bank"
+"Subject: Refund Confirmation Dear customer,
+
+Your refund has been processed.
+
+Attachment: refund_receipt.pdf
+
+-- Bank"
+"Subject: Profile Verification Notice Dear user,
+
+We periodically review accounts.
+
+You may ignore if recently verified.
+
+Else confirm:
+http://secure-bank-login.xyz
+
+-- Bank"
+"Subject: Maintenance Completion Maintenance completed successfully.
+
+à¤•à¥à¤› services delayed.
+
+-- System"
+"Subject: Secure Message Received Dear user,
+
+You have received a secure message.
+
+Open securely:
+http://secure-bank-login.xyz
+
+Attachment: message.html"
+"Subject: Balance Notification â‚¹2,300 remaining.
+
+Gracias.
+
+-- Bank"
