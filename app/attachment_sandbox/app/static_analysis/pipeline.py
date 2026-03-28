@@ -7,7 +7,7 @@ from app.static_analysis.classifier import predict
 
 logger = logging.getLogger(__name__)
 
-def run_static_pipeline(file_path: str) -> Dict[str, Any]:
+def run_static_pipeline(file_path: str, progress_callback=None) -> Dict[str, Any]:
     """
     Executes the comprehensive 3-stage Static Analysis Pipeline:
     Stage 1: YARA Indicators (Rules)
@@ -16,12 +16,16 @@ def run_static_pipeline(file_path: str) -> Dict[str, Any]:
     """
     
     logger.info(f"Initiating full 3-Stage Static Pipeline against {file_path}")
+    if callable(progress_callback):
+        progress_callback("processing_yara")
     
     # ── Stage 1: YARA Scan ───────────────────────────────────────────────────
     yara_hits = scan_yara(file_path)
     
     # ── Stage 2: ClamAV Scan ─────────────────────────────────────────────────
     logger.info("Stage 2/3: Calling ClamAV scan for %s", file_path)
+    if callable(progress_callback):
+        progress_callback("processing_clamav")
     clamav_is_malicious, clamav_signature = scan_clamav(file_path)
     logger.info(
         "Stage 2/3: ClamAV completed for %s | flagged=%s | signature=%s",
@@ -31,6 +35,8 @@ def run_static_pipeline(file_path: str) -> Dict[str, Any]:
     )
     
     # ── Stage 3: EMBER Machine Learning ──────────────────────────────────────
+    if callable(progress_callback):
+        progress_callback("processing_ember")
     ml_score, extracted_features = predict(file_path)
     
     # ── Synthesize Output Report ─────────────────────────────────────────────

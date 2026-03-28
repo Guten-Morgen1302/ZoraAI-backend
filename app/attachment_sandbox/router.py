@@ -9,10 +9,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import AttachmentAnalysis, AttachmentRequest
 from app.schemas import AttachmentAnalyzeResponse, AttachmentEngineResult
 from app.attachment_sandbox.llm_reasoner import explain_attachment_with_llm
@@ -20,6 +20,7 @@ from app.attachment_sandbox.llm_reasoner import explain_attachment_with_llm
 router = APIRouter(prefix="/attachment", tags=["attachment-analysis"])
 
 _SANDBOX_ROOT = Path(__file__).resolve().parent
+_LLM_METADATA_KEY = "__llm_metadata"
 
 def _ensure_sandbox_path() -> None:
     sandbox_root_str = str(_SANDBOX_ROOT)
@@ -97,74 +98,63 @@ def _normalize_engine_results(engines: Any) -> dict[str, AttachmentEngineResult]
     return result
 
 
-@router.post("/analyze", response_model=AttachmentAnalyzeResponse, status_code=status.HTTP_200_OK)
-async def analyze_attachment(
-    request: Request,
-    db: Session = Depends(get_db),
-    file: UploadFile | None = File(default=None),
-    with_llm_explanation: str = Form("false"),
-):
-    if file is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file uploaded")
-
-    filename = os.path.basename(file.filename or "uploaded_attachment")
-    if not filename:
-        filename = "uploaded_attachment"
-
-    mime_type = file.content_type
-    suffix = Path(filename).suffix
-    temp_file_path: str | None = None
-    request_row: AttachmentRequest | None = None
-
+def _run_attachment_analysis_job(
+    request_id: uuid.UUID,
+    temp_file_path: str,
+    filename: str,
+    file_size: int,
+    with_llm_explanation: bool,
+) -> None:
+    db = SessionLocal()
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            content = await file.read()
-            if not content:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Uploaded file is empty",
-                )
-            tmp.write(content)
-            temp_file_path = tmp.name
-
-        request_row = AttachmentRequest(
-            user_id=_safe_user_uuid(request),
-            filename=filename,
-            mime_type=mime_type,
-            file_size=len(content),
-            # Keep compatibility with existing DBs that still enforce NOT NULL.
-            s3_url="",
-            status="processing",
-        )
-        db.add(request_row)
-        db.commit()
-        db.refresh(request_row)
+        request_row = db.query(AttachmentRequest).filter(AttachmentRequest.id == request_id).first()
+        if request_row is None:
+            return
 
         run_static_pipeline = _load_pipeline_runner()
-        report = run_static_pipeline(temp_file_path)
+
+        def _update_status(next_status: str) -> None:
+            request_row.status = next_status
+            db.add(request_row)
+            db.commit()
+
+        report = run_static_pipeline(temp_file_path, progress_callback=_update_status)
 
         if not isinstance(report, dict):
             raise RuntimeError("Attachment pipeline returned an invalid response")
 
         response_kwargs = {
             "filename": filename,
-            "file_size": len(content),
+            "file_size": file_size,
             "final_verdict": str(report.get("final_verdict") or "unknown"),
             "engines": _normalize_engine_results(report.get("engines")),
             "features": report.get("features") if isinstance(report.get("features"), dict) else {},
         }
 
-        is_llm_requested = with_llm_explanation.strip().lower() in ("true", "1", "yes", "y", "on")
-        if is_llm_requested:
+        if with_llm_explanation:
+            _update_status("processing_llm")
             llm_result = explain_attachment_with_llm(report, filename)
-            response_kwargs.update({
-                "llm_enhanced": True,
-                "llm_label": llm_result.get("final_label"),
-                "llm_confidence": llm_result.get("confidence"),
-                "llm_explanation": llm_result.get("explanation"),
-                "llm_key_indicators": llm_result.get("key_indicators", []),
-                "llm_recommendations": llm_result.get("recommendations", []),
-            })
+            response_kwargs.update(
+                {
+                    "llm_enhanced": True,
+                    "llm_label": llm_result.get("final_label"),
+                    "llm_confidence": llm_result.get("confidence"),
+                    "llm_explanation": llm_result.get("explanation"),
+                    "llm_key_indicators": llm_result.get("key_indicators", []),
+                    "llm_recommendations": llm_result.get("recommendations", []),
+                }
+            )
+
+        features_payload = dict(response_kwargs["features"])
+        if response_kwargs.get("llm_enhanced"):
+            features_payload[_LLM_METADATA_KEY] = {
+                "llm_enhanced": bool(response_kwargs.get("llm_enhanced", False)),
+                "llm_label": response_kwargs.get("llm_label"),
+                "llm_confidence": response_kwargs.get("llm_confidence"),
+                "llm_explanation": response_kwargs.get("llm_explanation"),
+                "llm_key_indicators": response_kwargs.get("llm_key_indicators", []),
+                "llm_recommendations": response_kwargs.get("llm_recommendations", []),
+            }
 
         engines_payload = {
             name: {
@@ -180,7 +170,7 @@ async def analyze_attachment(
             request_id=request_row.id,
             final_verdict=response_kwargs["final_verdict"],
             engines=json.dumps(engines_payload, default=str),
-            features=json.dumps(response_kwargs["features"], default=str),
+            features=json.dumps(features_payload, default=str),
             status="completed",
             error_message=None,
         )
@@ -189,18 +179,106 @@ async def analyze_attachment(
         db.add(request_row)
         db.add(analysis_row)
         db.commit()
-        db.refresh(analysis_row)
+    except Exception as exc:  # noqa: BLE001
+        _safe_rollback(db)
 
-        response_kwargs.update(
-            {
-                "request_id": request_row.id,
-                "analysis_id": analysis_row.id,
-                "s3_url": request_row.s3_url,
-                "status": request_row.status,
-            }
+        request_row = db.query(AttachmentRequest).filter(AttachmentRequest.id == request_id).first()
+        if request_row is not None:
+            request_row.status = "failed"
+            db.add(request_row)
+            db.commit()
+
+            existing_analysis = db.query(AttachmentAnalysis).filter(AttachmentAnalysis.request_id == request_row.id).first()
+            if existing_analysis is None:
+                failed_analysis = AttachmentAnalysis(
+                    request_id=request_row.id,
+                    final_verdict="unknown",
+                    engines=json.dumps({}, default=str),
+                    features=json.dumps({}, default=str),
+                    status="failed",
+                    error_message=str(exc),
+                )
+                db.add(failed_analysis)
+                db.commit()
+    finally:
+        db.close()
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except OSError:
+                pass
+
+
+@router.post("/analyze", response_model=AttachmentAnalyzeResponse, status_code=status.HTTP_200_OK)
+async def analyze_attachment(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    file: UploadFile | None = File(default=None),
+    with_llm_explanation: str = Form("false"),
+):
+    if file is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No file uploaded")
+
+    filename = os.path.basename(file.filename or "uploaded_attachment")
+    if not filename:
+        filename = "uploaded_attachment"
+
+    mime_type = file.content_type
+    suffix = Path(filename).suffix
+    temp_file_path: str | None = None
+    request_row: AttachmentRequest | None = None
+    file_size = 0
+    is_llm_requested = with_llm_explanation.strip().lower() in ("true", "1", "yes", "y", "on")
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            if not content:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Uploaded file is empty",
+                )
+            tmp.write(content)
+            temp_file_path = tmp.name
+            file_size = len(content)
+
+        request_row = AttachmentRequest(
+            user_id=_safe_user_uuid(request),
+            filename=filename,
+            mime_type=mime_type,
+            file_size=file_size,
+            # Keep compatibility with existing DBs that still enforce NOT NULL.
+            s3_url="",
+            status="queued",
         )
+        db.add(request_row)
+        db.commit()
+        db.refresh(request_row)
 
-        return AttachmentAnalyzeResponse(**response_kwargs)
+        background_tasks.add_task(
+            _run_attachment_analysis_job,
+            request_row.id,
+            temp_file_path,
+            filename,
+            file_size,
+            is_llm_requested,
+        )
+        # Background task is now responsible for temp file cleanup.
+        temp_file_path = None
+
+        return AttachmentAnalyzeResponse(
+            request_id=request_row.id,
+            analysis_id=None,
+            filename=filename,
+            file_size=file_size,
+            s3_url=request_row.s3_url,
+            status=request_row.status,
+            final_verdict="processing",
+            engines={},
+            features={},
+            llm_enhanced=is_llm_requested,
+        )
     except HTTPException:
         _safe_rollback(db)
         if request_row is not None:
@@ -306,7 +384,7 @@ def get_attachment_history_detail(request_id: str, request: Request, db: Session
 
     query = (
         db.query(AttachmentRequest, AttachmentAnalysis)
-        .join(AttachmentAnalysis, AttachmentAnalysis.request_id == AttachmentRequest.id)
+        .outerjoin(AttachmentAnalysis, AttachmentAnalysis.request_id == AttachmentRequest.id)
         .filter(AttachmentRequest.id == request_uuid)
     )
     if user_id is not None:
@@ -317,19 +395,30 @@ def get_attachment_history_detail(request_id: str, request: Request, db: Session
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment analysis not found")
 
     request_row, analysis_row = row
-    engines = _safe_json_loads(analysis_row.engines)
-    features = _safe_json_loads(analysis_row.features)
+    engines = _safe_json_loads(analysis_row.engines) if analysis_row else {}
+    features = _safe_json_loads(analysis_row.features) if analysis_row else {}
+    llm_metadata: dict[str, object] = {}
+    if isinstance(features, dict):
+        raw_llm_metadata = features.pop(_LLM_METADATA_KEY, None)
+        if isinstance(raw_llm_metadata, dict):
+            llm_metadata = raw_llm_metadata
 
     payload = {
         "request_id": request_row.id,
-        "analysis_id": analysis_row.id,
+        "analysis_id": analysis_row.id if analysis_row else None,
         "filename": request_row.filename,
         "file_size": request_row.file_size,
         "s3_url": request_row.s3_url,
         "status": request_row.status,
-        "final_verdict": analysis_row.final_verdict,
+        "final_verdict": analysis_row.final_verdict if analysis_row else "processing",
         "engines": _normalize_engine_results(engines),
         "features": features if isinstance(features, dict) else {},
+        "llm_enhanced": bool(llm_metadata.get("llm_enhanced", False)),
+        "llm_label": llm_metadata.get("llm_label"),
+        "llm_confidence": llm_metadata.get("llm_confidence"),
+        "llm_explanation": llm_metadata.get("llm_explanation"),
+        "llm_key_indicators": llm_metadata.get("llm_key_indicators") if isinstance(llm_metadata.get("llm_key_indicators"), list) else [],
+        "llm_recommendations": llm_metadata.get("llm_recommendations") if isinstance(llm_metadata.get("llm_recommendations"), list) else [],
     }
 
     return AttachmentAnalyzeResponse(**payload)
