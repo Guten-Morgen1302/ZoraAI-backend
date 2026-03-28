@@ -1,0 +1,2 @@
+app/text_analysis/sms_analyzer/sms_model/model.safetensors filter=lfs diff=lfs merge=lfs -text
+app/text_analysis/email_analyzer/email_model/model.safetensors filter=lfs diff=lfs merge=lfs -text

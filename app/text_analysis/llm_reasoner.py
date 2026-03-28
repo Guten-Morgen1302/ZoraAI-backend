@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -17,10 +18,16 @@ logger = logging.getLogger("zora.text_analysis.llm")
 # =========================
 DEFAULT_OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 DEFAULT_OLLAMA_TAGS_URL = os.getenv("OLLAMA_TAGS_URL", "http://localhost:11434/api/tags")
-DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b")
+DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "phi3:mini")
 DEFAULT_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "50"))
 DEFAULT_CONNECT_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_CONNECT_TIMEOUT_SECONDS", "5"))
 DEFAULT_MAX_TOKENS = int(os.getenv("OLLAMA_MAX_TOKENS", "120"))
+DEFAULT_MIN_NUM_PREDICT = int(os.getenv("OLLAMA_MIN_NUM_PREDICT", "80"))
+DEFAULT_SMS_TEXT_MAX_CHARS = int(os.getenv("OLLAMA_SMS_TEXT_MAX_CHARS", "900"))
+DEFAULT_SMS_FEATURE_MAX_CHARS = int(os.getenv("OLLAMA_SMS_FEATURE_MAX_CHARS", "280"))
+DEFAULT_SMS_PROMPT_MAX_CHARS = int(os.getenv("OLLAMA_SMS_PROMPT_MAX_CHARS", "2600"))
+DEFAULT_SMS_MAX_INPUT_TOKENS = int(os.getenv("OLLAMA_SMS_MAX_INPUT_TOKENS", "700"))
+DEFAULT_TIMEOUT_MAX_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_MAX_SECONDS", "120"))
 DEFAULT_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.1"))
 DEFAULT_RETRIES = int(os.getenv("OLLAMA_RETRIES", "2"))
 
@@ -60,6 +67,33 @@ def _normalize_label(value: Any) -> str:
     return normalized if normalized in ALLOWED_LABELS else "unknown"
 
 
+def _compact_json(value: Any, max_chars: int) -> str:
+    try:
+        rendered = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError):
+        rendered = "[]"
+    if len(rendered) <= max_chars:
+        return rendered
+    return rendered[:max_chars] + "..."
+
+
+def _estimate_tokens(text: str) -> int:
+    # Rough approximation: ~4 chars per token for English text.
+    return max(1, len(text) // 4)
+
+
+def _enforce_prompt_budget(prompt: str) -> str:
+    limited = prompt
+    if len(limited) > DEFAULT_SMS_PROMPT_MAX_CHARS:
+        limited = limited[:DEFAULT_SMS_PROMPT_MAX_CHARS]
+
+    max_chars_by_tokens = max(400, DEFAULT_SMS_MAX_INPUT_TOKENS * 4)
+    if len(limited) > max_chars_by_tokens:
+        limited = limited[:max_chars_by_tokens]
+
+    return limited
+
+
 # =========================
 # PROMPT
 # =========================
@@ -72,19 +106,23 @@ def build_prompt(data: dict[str, Any]) -> str:
     similarity_score = float(data.get("similarity_score") or 0.0)
     rule_flags = data.get("rule_flags") or []
 
+    sms_text_short = sms_text[:DEFAULT_SMS_TEXT_MAX_CHARS]
+    url_flags_text = _compact_json(url_flags, max_chars=DEFAULT_SMS_FEATURE_MAX_CHARS)
+    rule_flags_text = _compact_json(rule_flags, max_chars=DEFAULT_SMS_FEATURE_MAX_CHARS)
+
     return (
         "You are a fraud detection expert specializing in SMS phishing, social engineering, try to explain the sms_text"
         "and scam pattern analysis.\n"
         "You must reason from the given evidence and sms_text and return STRICT JSON only.\n"
         "Do not include markdown, code blocks, or extra commentary.\n\n"
         "Evidence:\n"
-        f"- SMS text: {sms_text}\n"
+        f"- SMS text: {sms_text_short}\n"
         f"- NLP prediction: {nlp_prediction}\n"
         f"- NLP confidence: {nlp_confidence:.4f}\n"
-        f"- URL flags: {json.dumps(url_flags)}\n"
+        f"- URL flags: {url_flags_text}\n"
         f"- Stylometry score: {stylometry_score:.4f}\n"
         f"- Similarity score: {similarity_score:.4f}\n"
-        f"- Rule flags: {json.dumps(rule_flags)}\n\n"
+        f"- Rule flags: {rule_flags_text}\n\n"
         "Output format (strict JSON object):\n"
         '{"final_label":"safe|spam|phishing|scam","confidence":0.0,"explanation":"clear human explanation"}'
     )
@@ -156,22 +194,34 @@ def _prepare_model(model_name: str) -> None:
 # =========================
 def call_llm(prompt: str) -> str:
     model_name = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
-    cache_key = (model_name, prompt)
+    bounded_prompt = _enforce_prompt_budget(prompt)
+    cache_key = (model_name, bounded_prompt)
 
     # Fast path (no lock)
     cached = _response_cache.get(cache_key)
     if cached:
-        logger.info("Using cached LLM response")
+        logger.debug("Using cached LLM response")
         return cached
 
-    payload = _BASE_PAYLOAD.copy()
+    payload = copy.deepcopy(_BASE_PAYLOAD)
     payload["model"] = model_name
-    payload["prompt"] = prompt
+    payload["prompt"] = bounded_prompt
+
+    prompt_tokens = _estimate_tokens(bounded_prompt)
+    adaptive_read_timeout = min(
+        DEFAULT_TIMEOUT_MAX_SECONDS,
+        max(DEFAULT_TIMEOUT_SECONDS, 35 + (prompt_tokens * 0.06)),
+    )
+
+    current_num_predict = int(payload.get("options", {}).get("num_predict") or DEFAULT_MAX_TOKENS)
+    if prompt_tokens > int(DEFAULT_SMS_MAX_INPUT_TOKENS * 0.8):
+        reduced_num_predict = max(DEFAULT_MIN_NUM_PREDICT, int(current_num_predict * 0.75))
+        payload.setdefault("options", {})["num_predict"] = reduced_num_predict
 
     _prepare_model(model_name)
 
     logger.info("Calling local Ollama model: %s", model_name)
-    timeout = (DEFAULT_CONNECT_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS)
+    timeout = (DEFAULT_CONNECT_TIMEOUT_SECONDS, adaptive_read_timeout)
 
     raw_text = ""
     last_error: Exception | None = None

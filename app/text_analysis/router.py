@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -56,7 +57,7 @@ from app.text_analysis.service import (
 from app.text_analysis.sms_analyzer.feeback_mechanism.sms_feedback_service import SMSFeedbackService
 from app.text_analysis.email_analyzer.feeback_mechanism.email_feedback_service import EmailFeedbackService
 from app.auth.security import get_token_subject
-from app.models import SmsThreatResult, EmailThreatResult, PhishingRequest as PhishingRequestModel
+from app.models import ApiKey, SmsThreatResult, EmailThreatResult, PhishingRequest as PhishingRequestModel
 
 router = APIRouter(prefix="/text", tags=["text-analysis"])
 GMAIL_CLIENT_SECRETS_FILE = Path(__file__).resolve().parent / "email_analyzer" / "gmail_client_secrets.json"
@@ -407,7 +408,6 @@ def _run_email_full_analysis(
     llm_confidence: float | None = None
 
     if with_llm_explanation:
-        print("[email-debug] LLM explanation requested; calling OpenRouter")
         llm_result = explain_email_with_llm(
             {
                 "sender": sender,
@@ -508,6 +508,39 @@ def _resolve_user_from_cookies(request: Request) -> str:
     request.state.user_id = user_id
     return str(user_id)
 
+
+def _resolve_user_id_for_api_or_cookie(request: Request, db: Session) -> str | None:
+    existing_user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+    if existing_user_id:
+        return str(existing_user_id)
+
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing API key")
+
+        key_record = (
+            db.query(ApiKey)
+            .filter(ApiKey.api_key == token, ApiKey.is_active.is_(True), ApiKey.revoked_at.is_(None))
+            .first()
+        )
+        if not key_record or key_record.expires_at <= datetime.utcnow():
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired API key")
+
+        request.state.user_id = str(key_record.user_id)
+        return str(key_record.user_id)
+
+    access_token = request.cookies.get("access_token")
+    if access_token:
+        user_id = get_token_subject(access_token, expected_type="access")
+        if not user_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token")
+        request.state.user_id = user_id
+        return str(user_id)
+
+    return None
+
 ## API route for analyzing text
 
 @router.post("/analyze", response_model=TextAnalyzeResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -555,7 +588,7 @@ def similarity_search_sms(payload: SMSVectorSearchRequest):
 
 @router.post("/sms/analyze", response_model=SMSAnalyzeResponse, status_code=status.HTTP_200_OK)
 def analyze_sms(payload: SMSAnalyzeRequest, request: Request, db: Session = Depends(get_db)):
-    user_id = request.state.user_id if hasattr(request.state, "user_id") else None
+    user_id = _resolve_user_id_for_api_or_cookie(request, db)
 
     service = SMSFraudAnalysisService(db)
     try:
@@ -726,10 +759,6 @@ def fetch_and_preprocess_latest_email(payload: LatestEmailFetchRequest | None = 
 
 @router.post("/email/analyze/latest", response_model=LatestEmailAnalyzeResponse, status_code=status.HTTP_200_OK)
 def fetch_latest_email_and_analyze(payload: LatestEmailAnalyzeRequest, request: Request, db: Session = Depends(get_db)):
-    print(
-        "[email-debug] Starting /text/email/analyze/latest "
-        f"query={payload.query!r} force_reauth={payload.force_reauth}"
-    )
     try:
         latest_email = fetch_latest_email(
             client_secrets_path=GMAIL_CLIENT_SECRETS_FILE,
@@ -748,7 +777,6 @@ def fetch_latest_email_and_analyze(payload: LatestEmailAnalyzeRequest, request: 
     subject = str(latest_email.get("subject") or "")
     body = str(latest_email.get("body") or "")
 
-    print(f"[email-debug] Running NLP + similarity + stylometry for message_id={latest_email.get('message_id')}")
     user_id = request.state.user_id if hasattr(request.state, "user_id") else None
     try:
         return _run_email_full_analysis(
@@ -769,10 +797,6 @@ def fetch_latest_email_and_analyze(payload: LatestEmailAnalyzeRequest, request: 
 
 @router.post("/email/analyze/by-id", response_model=LatestEmailAnalyzeResponse, status_code=status.HTTP_200_OK)
 def analyze_email_by_ids(payload: EmailAnalyzeByIdRequest, request: Request, db: Session = Depends(get_db)):
-    print(
-        "[email-debug] Starting /text/email/analyze/by-id "
-        f"message_id={payload.message_id!r} thread_id={payload.thread_id!r}"
-    )
     try:
         email_data = fetch_email_by_message_id(
             client_secrets_path=GMAIL_CLIENT_SECRETS_FILE,
@@ -808,7 +832,6 @@ def analyze_email_by_ids(payload: EmailAnalyzeByIdRequest, request: Request, db:
 
 @router.post("/email/analyze/extension", response_model=LatestEmailAnalyzeResponse, status_code=status.HTTP_200_OK)
 def analyze_email_manual(payload: EmailAnalyzeManualRequest, request: Request, db: Session = Depends(get_db)):
-    print("[email-debug] Starting /text/email/analyze/extension")
     try:
         user_id = request.state.user_id if hasattr(request.state, "user_id") else None
         return _run_email_full_analysis(
@@ -834,7 +857,6 @@ def analyze_email_manual_with_user_cookie(
     user_id: str = Depends(_resolve_user_from_cookies),
     db: Session = Depends(get_db),
 ):
-    print("[email-debug] Starting /text/email/analyze")
     try:
         return _run_email_full_analysis(
             db=db,

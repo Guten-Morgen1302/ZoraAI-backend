@@ -241,9 +241,9 @@ Optional LLM reasoning is implemented in llm_reasoner.py.
 
 ### 10.1 Provider and Model
 
-- provider path: OpenRouter
-- model default: google/gemini-2.0-flash-001
-- client library: openai SDK with OpenRouter base URL
+- provider path: local Ollama
+- model default: phi3:mini
+- client library: direct HTTP requests to Ollama generate endpoint
 
 ### 10.2 Prompt Design
 
@@ -266,7 +266,6 @@ The LLM is instructed to return strict JSON:
 - structured parser with fallback behavior
 - normalization of output labels
 - timeout/tokens/temperature controls via environment
-- in-memory response cache keyed by prompt and model
 
 ---
 
@@ -375,7 +374,7 @@ This Email Analyzer is a production-ready phishing intelligence pipeline that co
 - stylometry behavior scoring
 - vector-memory similarity retrieval
 - weighted threat scoring with typed outcomes
-- optional OpenRouter-based explanation enhancement
+- optional Ollama-based explanation enhancement
 - persistent request/result storage in PostgreSQL
 
 It is designed to provide both a robust phishing decision and a defensible evidence trace for operational security workflows.
