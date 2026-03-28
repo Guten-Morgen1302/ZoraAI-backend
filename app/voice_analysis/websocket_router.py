@@ -239,7 +239,8 @@ async def websocket_endpoint(websocket: WebSocket):
     transcript_accumulator = []
     pending_tasks = []   # track background tasks so we can await them on stop
 
-    init_segment: bytes | None = None
+    all_bytes = b""
+    total_samples_processed = 0
     numpy_buffer = np.array([], dtype=np.float32)
     SAMPLES_THRESHOLD = SR * 3
     SAMPLES_KEEP_TAIL = SR * 1
@@ -250,13 +251,11 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             try:
-                # receive_bytes() blocks until data OR disconnect
                 raw = await websocket.receive()
             except WebSocketDisconnect:
                 print("[CONNECTION] 🔌 Client disconnected")
                 break
 
-            # Check if frontend sent "STOP_CAPTURE" text message
             if raw.get("type") == "websocket.receive" and "text" in raw:
                 text_msg = raw["text"]
                 if text_msg == "STOP_CAPTURE":
@@ -270,31 +269,31 @@ async def websocket_endpoint(websocket: WebSocket):
 
             data = raw["bytes"]
             chunk_count += 1
-            print(f"[LAYER 1: CAPTURE] chunk #{chunk_count} | {len(data)} bytes")
-
-            if chunk_count == 1:
-                init_segment = data
-                print(f"[LAYER 1: CAPTURE] chunk #1 | saved init_segment ({len(init_segment)} bytes)")
-                decodable = data
-            else:
-                if init_segment is None:
-                    continue
-                decodable = init_segment + data
+            all_bytes += data
+            print(f"[LAYER 1: CAPTURE] chunk #{chunk_count} | {len(data)} bytes | total={len(all_bytes)} bytes")
 
             try:
-                new_samples = await loop.run_in_executor(executor, decode_webm_to_numpy, decodable)
-                if chunk_count > 1 and len(new_samples) > 0:
-                    init_audio_len = int(SR * 0.5)
-                    new_samples = new_samples[min(init_audio_len, len(new_samples) - 1):]
-                numpy_buffer = np.concatenate([numpy_buffer, new_samples])
-                print(f"[LAYER 1: BUFFER] chunk #{chunk_count} | buffer={len(numpy_buffer)/SR:.1f}s / need {SAMPLES_THRESHOLD/SR:.0f}s")
+                # Decode the entire stream so far to ensure valid EBML/WebM structure
+                current_full_audio = await loop.run_in_executor(executor, decode_webm_to_numpy, all_bytes)
+                
+                # Extract only the NEW samples
+                if len(current_full_audio) > total_samples_processed:
+                    new_samples = current_full_audio[total_samples_processed:]
+                    total_samples_processed = len(current_full_audio)
+                    numpy_buffer = np.concatenate([numpy_buffer, new_samples])
+                    print(f"[LAYER 1: BUFFER] chunk #{chunk_count} | new={len(new_samples)/SR:.1f}s | buffer={len(numpy_buffer)/SR:.1f}s")
+                else:
+                    print(f"[LAYER 1: BUFFER] chunk #{chunk_count} | no new samples decoded")
+
             except Exception as decode_err:
-                print(f"[LAYER 1: DECODE] chunk #{chunk_count} | ❌ {decode_err}")
+                # Often the last few bytes of a chunk are incomplete; we wait for next chunk
+                print(f"[LAYER 1: DECODE] chunk #{chunk_count} | ⚠️ {decode_err} (waiting for more data)")
                 continue
 
             # --- DISPATCH ---
             if len(numpy_buffer) >= SAMPLES_THRESHOLD:
                 dispatch_samples = numpy_buffer.copy()
+                # Keep 1s overlap for smoother analysis if needed, or just clear
                 numpy_buffer = numpy_buffer[-SAMPLES_KEEP_TAIL:]
                 dispatch_count += 1
                 print(f"[DISPATCH] 🔥 dispatch #{dispatch_count} | {len(dispatch_samples)/SR:.1f}s → Layer 2")

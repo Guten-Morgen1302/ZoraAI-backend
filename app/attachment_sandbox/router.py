@@ -272,6 +272,13 @@ def get_attachment_history(request: Request, db: Session = Depends(get_db)):
     history: list[dict[str, object]] = []
     for request_row, analysis_row in rows:
         engines = _safe_json_loads(analysis_row.engines) if analysis_row else {}
+        clamav_signature = None
+        clam_payload = engines.get("clamav") if isinstance(engines, dict) else None
+        if isinstance(clam_payload, dict):
+            raw_signature = clam_payload.get("signature")
+            if isinstance(raw_signature, str) and raw_signature.strip():
+                clamav_signature = raw_signature.strip()
+
         history.append(
             {
                 "request_id": str(request_row.id),
@@ -281,6 +288,7 @@ def get_attachment_history(request: Request, db: Session = Depends(get_db)):
                 "status": request_row.status,
                 "final_verdict": analysis_row.final_verdict if analysis_row else None,
                 "flagged_engines": _count_flagged_engines(engines),
+                "clamav_signature": clamav_signature,
             }
         )
 
