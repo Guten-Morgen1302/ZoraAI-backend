@@ -22,6 +22,11 @@ DEFAULT_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "phi3:mini")
 DEFAULT_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))
 DEFAULT_CONNECT_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_CONNECT_TIMEOUT_SECONDS", "5"))
 DEFAULT_MAX_TOKENS = int(os.getenv("OLLAMA_EMAIL_MAX_TOKENS", "300"))
+DEFAULT_MIN_NUM_PREDICT = int(os.getenv("OLLAMA_EMAIL_MIN_NUM_PREDICT", "120"))
+DEFAULT_EMAIL_BODY_MAX_CHARS = int(os.getenv("OLLAMA_EMAIL_BODY_MAX_CHARS", "900"))
+DEFAULT_EMAIL_PROMPT_MAX_CHARS = int(os.getenv("OLLAMA_EMAIL_PROMPT_MAX_CHARS", "3200"))
+DEFAULT_EMAIL_MAX_INPUT_TOKENS = int(os.getenv("OLLAMA_EMAIL_MAX_INPUT_TOKENS", "900"))
+DEFAULT_TIMEOUT_MAX_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_MAX_SECONDS", "120"))
 DEFAULT_BACKUP_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_BACKUP_TIMEOUT_SECONDS", "60"))
 DEFAULT_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.1"))
 DEFAULT_RETRIES = int(os.getenv("OLLAMA_RETRIES", "2"))
@@ -56,11 +61,35 @@ _BASE_PAYLOAD: dict[str, Any] = {
 # =========================
 def _normalize_label(value: Any) -> str:
     label = str(value or "").strip().lower()
-    if label in {"phishing", "spam", "scam", "fraud", "malicious"}:
+    if label in {"phishing", "spam", "scam", "fraud", "malicious", "unsafe"}:
         return "phishing"
-    if label in {"safe", "genuine", "legitimate", "benign"}:
+    if label in {"safe", "genuine", "legitimate", "benign", "ham", "clean"}:
         return "genuine"
     return "unknown"
+
+
+def _normalize_model_name(model_name: str) -> str:
+    normalized = str(model_name or "").strip()
+    aliases = {
+        "phi3:min": "phi3:mini",
+        "phi3": "phi3:mini",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
+def _enforce_prompt_budget(prompt: str) -> str:
+    limited = prompt
+    if len(limited) > DEFAULT_EMAIL_PROMPT_MAX_CHARS:
+        limited = limited[:DEFAULT_EMAIL_PROMPT_MAX_CHARS]
+
+    max_chars_by_tokens = max(500, DEFAULT_EMAIL_MAX_INPUT_TOKENS * 4)
+    if len(limited) > max_chars_by_tokens:
+        limited = limited[:max_chars_by_tokens]
+    return limited
 
 
 # =========================
@@ -76,7 +105,7 @@ def _build_prompt(data: dict[str, Any]) -> str:
     stylometry_score = float(data.get("stylometry_score") or 0.0)
     final_score = float(data.get("risk_score") or 0.0)
 
-    body_short = body[:800]
+    body_short = body[:DEFAULT_EMAIL_BODY_MAX_CHARS]
 
     return (
         "You are an email fraud analyst. "
@@ -161,17 +190,36 @@ def _prepare_model(model_name: str) -> None:
 # LLM CALL (OPTIMIZED)
 # =========================
 def _call_llm(prompt: str) -> str:
-    model_name = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
+    model_name = _normalize_model_name(os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL))
+    bounded_prompt = _enforce_prompt_budget(prompt)
 
     # Deep copy to avoid mutating the template
     payload = copy.deepcopy(_BASE_PAYLOAD)
     payload["model"] = model_name
-    payload["prompt"] = prompt
+    payload["prompt"] = bounded_prompt
+
+    prompt_tokens = _estimate_tokens(bounded_prompt)
+    adaptive_read_timeout = min(
+        DEFAULT_TIMEOUT_MAX_SECONDS,
+        max(DEFAULT_TIMEOUT_SECONDS, 35 + (prompt_tokens * 0.06)),
+    )
+
+    current_num_predict = int(payload.get("options", {}).get("num_predict") or DEFAULT_MAX_TOKENS)
+    if prompt_tokens > int(DEFAULT_EMAIL_MAX_INPUT_TOKENS * 0.8):
+        reduced_num_predict = max(DEFAULT_MIN_NUM_PREDICT, int(current_num_predict * 0.75))
+        payload.setdefault("options", {})["num_predict"] = reduced_num_predict
 
     _prepare_model(model_name)
 
-    logger.info("Calling local Ollama model=%s", model_name)
-    timeout = (DEFAULT_CONNECT_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS)
+    logger.info(
+        "Calling local Ollama model=%s prompt_chars=%s prompt_tokens~%s num_predict=%s read_timeout=%.2f",
+        model_name,
+        len(bounded_prompt),
+        prompt_tokens,
+        payload.get("options", {}).get("num_predict"),
+        adaptive_read_timeout,
+    )
+    timeout = (DEFAULT_CONNECT_TIMEOUT_SECONDS, adaptive_read_timeout)
 
     raw_text = ""
     last_error: Exception | None = None
@@ -234,9 +282,21 @@ def _parse_response(raw_text: str) -> dict[str, Any]:
                 continue
             break
 
-        final_label = _normalize_label(parsed.get("final_label"))
+        final_label = _normalize_label(
+            parsed.get("final_label")
+            or parsed.get("label")
+            or parsed.get("classification")
+            or parsed.get("verdict")
+            or parsed.get("final_verdict")
+        )
         confidence_raw = parsed.get("confidence", 0.0)
-        explanation = str(parsed.get("explanation") or "").strip()
+        explanation = str(
+            parsed.get("explanation")
+            or parsed.get("reason")
+            or parsed.get("rationale")
+            or parsed.get("summary")
+            or ""
+        ).strip()
 
         try:
             confidence = float(confidence_raw)
@@ -245,8 +305,15 @@ def _parse_response(raw_text: str) -> dict[str, Any]:
 
         confidence = max(0.0, min(1.0, confidence))
 
-        if final_label == "unknown" or not explanation:
+        if final_label == "unknown":
             continue
+
+        if not explanation:
+            explanation = (
+                "LLM classified this email as phishing based on suspicious sender/content signals and model evidence."
+                if final_label == "phishing"
+                else "LLM classified this email as genuine based on benign sender/content signals and model evidence."
+            )
 
         return {
             "final_label": final_label,
@@ -261,7 +328,7 @@ def _parse_response(raw_text: str) -> dict[str, Any]:
 # =========================
 def explain_email_with_llm(data: dict[str, Any]) -> dict[str, Any]:
     prompt = _build_prompt(data)
-    model_name = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
+    model_name = _normalize_model_name(os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL))
     cache_key = (model_name, prompt)
     started_at = time.monotonic()
 
@@ -281,12 +348,25 @@ def explain_email_with_llm(data: dict[str, Any]) -> dict[str, Any]:
                 )
                 return cached_backup
 
-        logger.warning("Email LLM call failed: %s", exc)
+        logger.warning("Email LLM call failed for model=%s: %s", model_name, exc)
         parsed = {
             "final_label": "unknown",
             "confidence": 0.0,
             "explanation": "LLM explanation unavailable",
         }
+
+    if parsed.get("final_label") == "unknown":
+        raw_preview = ""
+        try:
+            raw_preview = (raw_output if 'raw_output' in locals() else "")[:350]
+        except Exception:
+            raw_preview = ""
+        logger.warning(
+            "Email LLM returned unparsable/unknown label. sender=%s subject_len=%s raw_preview=%s",
+            str(data.get("sender") or "")[:80],
+            len(str(data.get("subject") or "")),
+            raw_preview,
+        )
 
     if parsed.get("final_label") != "unknown" and str(parsed.get("explanation") or "").strip():
         with _cache_lock:
