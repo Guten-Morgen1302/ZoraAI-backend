@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 import uuid
 from typing import Any
@@ -23,6 +24,7 @@ from app.url_analysis.fingerprint_beacon_analyzer import (
     FINGERPRINT_BEACON_INIT_SCRIPT,
     analyze_page_fingerprint_and_beaconing,
 )
+from app.url_analysis.docker_sandbox_executor import analyze_url_via_docker
 
 DEFAULT_TIMEOUT_MS = 18_000
 MAX_NETWORK_LOGS = 500
@@ -46,10 +48,14 @@ SUSPICIOUS_ENDPOINT_KEYWORDS: tuple[str, ...] = (
     "payment",
 )
 
+VALID_SANDBOX_MODES: set[str] = {"local", "docker", "auto"}
+
 
 def _safe_output(initial_url: str = "") -> dict[str, Any]:
     """Return default structured output for failures and edge-cases."""
     return {
+        "status": "error",
+        "error_stage": "",
         "initial_url": initial_url,
         "final_url": "",
         "redirect_chain": [],
@@ -66,6 +72,68 @@ def _safe_output(initial_url: str = "") -> dict[str, Any]:
         "fingerprint_beacon_analysis": {},
         "error": "",
     }
+
+
+def _sandbox_mode() -> str:
+    """Return sandbox execution mode from environment with safe fallback."""
+    configured = (os.getenv("URL_SANDBOX_MODE", "local") or "local").strip().lower()
+    return configured if configured in VALID_SANDBOX_MODES else "local"
+
+
+def _normalize_docker_result(payload: dict[str, Any], normalized_url: str) -> dict[str, Any]:
+    """Map Docker sandbox payload into the URL-analysis sandbox output schema."""
+    output = _safe_output(normalized_url)
+
+    if not isinstance(payload, dict):
+        output["error"] = "docker_invalid_payload"
+        output["error_stage"] = "docker_payload_parse"
+        return output
+
+    network_requests = payload.get("network_requests")
+    if not isinstance(network_requests, list):
+        requests_alias = payload.get("requests")
+        network_requests = requests_alias if isinstance(requests_alias, list) else []
+
+    status = str(payload.get("status") or "error").strip().lower()
+    if status not in {"success", "timeout", "error"}:
+        status = "error"
+
+    output.update(
+        {
+            "status": status,
+            "error_stage": str(payload.get("error_stage") or ""),
+            "initial_url": str(payload.get("initial_url") or normalized_url),
+            "final_url": str(payload.get("final_url") or payload.get("initial_url") or normalized_url),
+            "redirect_chain": payload.get("redirect_chain") if isinstance(payload.get("redirect_chain"), list) else [],
+            "dom_length": int(payload.get("dom_length") or 0),
+            "raw_html": str(payload.get("raw_html") or ""),
+            "num_scripts": int(payload.get("num_scripts") or 0),
+            "external_js": payload.get("external_js") if isinstance(payload.get("external_js"), list) else [],
+            "network_requests": network_requests,
+            "external_domains": payload.get("external_domains") if isinstance(payload.get("external_domains"), list) else [],
+            "suspicious_endpoints": payload.get("suspicious_endpoints") if isinstance(payload.get("suspicious_endpoints"), list) else [],
+            "set_cookie_headers": payload.get("set_cookie_headers") if isinstance(payload.get("set_cookie_headers"), list) else [],
+            "cookies": payload.get("cookies") if isinstance(payload.get("cookies"), list) else [],
+            "error": str(payload.get("error") or ""),
+            "phishing_behavior_analysis": payload.get("phishing_behavior_analysis") if isinstance(payload.get("phishing_behavior_analysis"), dict) else {},
+            "fingerprint_beacon_analysis": payload.get("fingerprint_beacon_analysis") if isinstance(payload.get("fingerprint_beacon_analysis"), dict) else {},
+        }
+    )
+
+    if output["status"] == "success":
+        output["error"] = ""
+        output["error_stage"] = ""
+    elif not output["error"]:
+        output["error"] = f"docker_sandbox_{output['status']}"
+        output["error_stage"] = output["error_stage"] or "docker_execution"
+
+    return output
+
+
+def _analyze_url_via_docker(normalized_url: str, timeout_ms: int) -> dict[str, Any]:
+    """Execute disposable Docker sandbox for a URL and normalize output."""
+    docker_result = analyze_url_via_docker(normalized_url, timeout_ms=timeout_ms)
+    return _normalize_docker_result(docker_result, normalized_url=normalized_url)
 
 
 def _format_error(exc: Exception) -> str:
@@ -212,7 +280,14 @@ def capture_network(page: Any, initial_registered_domain: str) -> dict[str, Any]
 
         request_url = request.url
         method = request.method
-        state["network_requests"].append({"url": request_url, "method": method})
+        resource_type = request.resource_type
+        state["network_requests"].append(
+            {
+                "url": request_url,
+                "method": method,
+                "resource_type": resource_type,
+            }
+        )
 
         parsed = urlparse(request_url)
         host = (parsed.hostname or "").lower()
@@ -231,8 +306,15 @@ def capture_network(page: Any, initial_registered_domain: str) -> dict[str, Any]
             if frame and frame == page.main_frame:
                 state["navigation_urls"].append(response.url)
 
+    def _on_frame_navigated(frame: Any) -> None:
+        if frame == page.main_frame:
+            current_url = str(frame.url or "").strip()
+            if current_url:
+                state["navigation_urls"].append(current_url)
+
     page.on("request", _on_request)
     page.on("response", _on_response)
+    page.on("framenavigated", _on_frame_navigated)
     return state
 
 
@@ -317,7 +399,9 @@ async def _analyze_url_impl(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> d
     _debug(run_id, f"start analyze_url raw={url!r} normalized={normalized_url!r}")
 
     if not normalized_url:
+        output["status"] = "error"
         output["error"] = "empty_url"
+        output["error_stage"] = "normalize_input"
         _debug(run_id, "aborting: empty normalized URL", level="warning")
         return output
 
@@ -331,7 +415,9 @@ async def _analyze_url_impl(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> d
             f"initial_host={initial_host!r} initial_registered_domain={initial_registered_domain!r}",
         )
     except Exception:
+        output["status"] = "error"
         output["error"] = "invalid_url"
+        output["error_stage"] = "parse_initial_domain"
         _debug(run_id, "aborting: invalid URL after parsing", level="warning")
         return output
 
@@ -452,6 +538,8 @@ async def _analyze_url_impl(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> d
         current_stage = "compose_output"
         output.update(
             {
+                "status": "success",
+                "error_stage": "",
                 "initial_url": normalized_url,
                 "final_url": final_url,
                 "redirect_chain": redirect_chain,
@@ -473,10 +561,14 @@ async def _analyze_url_impl(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> d
         return output
 
     except ImportError:
+        output["status"] = "error"
         output["error"] = "playwright_not_installed"
+        output["error_stage"] = current_stage
         _debug(run_id, "playwright is not installed", level="error")
         return output
     except Exception as exc:
+        output["status"] = "error"
+        output["error_stage"] = current_stage
         output["error"] = f"{_format_error(exc)}|stage={current_stage}|run_id={run_id}"
         logger.exception(
             "Sandbox analyze_url failed run_id=%s stage=%s normalized_url=%s",
@@ -518,6 +610,22 @@ async def _analyze_url_impl(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> d
 async def analyze_url(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[str, Any]:
     """Analyze a URL in a hardened headless browser sandbox."""
     run_id = str(uuid.uuid4())[:8]
+    mode = _sandbox_mode()
+    normalized_url = _normalize_input_url(url)
+
+    if mode in {"docker", "auto"} and normalized_url:
+        docker_result = await asyncio.to_thread(_analyze_url_via_docker, normalized_url, timeout_ms)
+        docker_status = str(docker_result.get("status") or "error").strip().lower()
+
+        if docker_status == "success" or mode == "docker":
+            _debug(run_id, f"sandbox mode={mode} returning docker status={docker_status}")
+            return docker_result
+
+        _debug(
+            run_id,
+            "docker sandbox failed in auto mode; falling back to local Playwright sandbox",
+            level="warning",
+        )
 
     # On Windows, Playwright requires a loop with subprocess support (Proactor).
     # Some ASGI loop configurations end up using SelectorEventLoop, which causes
@@ -577,7 +685,9 @@ def analyze_url_sync(url: str, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> dict[str
     except RuntimeError:
         # If already in an event loop, do not crash the caller.
         result = _safe_output(normalized_url)
+        result["status"] = "error"
         result["error"] = "event_loop_running_use_async_api"
+        result["error_stage"] = "analyze_url_sync"
         _debug(run_id, "runtime error: event loop already running", level="error")
         return result
 

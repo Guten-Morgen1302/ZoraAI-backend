@@ -131,6 +131,19 @@ Safety and reliability behavior:
 Response policy:
 - raw_html is intentionally removed from API response payload to reduce payload size and data leakage risk.
 
+Execution modes:
+- local mode (default): sandbox runs Playwright directly in backend process.
+- docker mode: sandbox runs in a disposable hardened Docker container and returns JSON telemetry to backend.
+- auto mode: attempts docker first, then falls back to local mode if container execution fails.
+
+Environment variables:
+- URL_SANDBOX_MODE=local|docker|auto
+- URL_SANDBOX_DOCKER_IMAGE=url-sandbox
+- URL_SANDBOX_DOCKER_MEMORY=512m
+- URL_SANDBOX_DOCKER_CPUS=1.0
+- URL_SANDBOX_DOCKER_PIDS=256
+- URL_SANDBOX_DOCKER_TIMEOUT_SEC=45
+
 
 ### Layer 6: Redirect/Iframe/CSP Phishing Behavior Analysis
 Source module:
