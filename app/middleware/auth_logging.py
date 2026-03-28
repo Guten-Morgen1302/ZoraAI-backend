@@ -18,7 +18,7 @@ logger = logging.getLogger("zora.middleware")
 
 class AuthLoggingMiddleware(BaseHTTPMiddleware):
     AUTH_EXEMPT_PATHS = {"/", "/openapi.json"}
-    AUTH_EXEMPT_PATH_PREFIXES = ("/docs", "/redoc", "/auth","/text/email/analyze/extension")
+    AUTH_EXEMPT_PATH_PREFIXES = ("/docs", "/redoc", "/auth","/text/email/analyze/extension", "/voice/ws")
     RATE_LIMIT_EXEMPT_PATHS = {"/", "/openapi.json"}
     RATE_LIMIT_EXEMPT_PATH_PREFIXES = ("/docs", "/redoc")
 
