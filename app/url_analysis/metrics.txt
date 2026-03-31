@@ -1,1 +1,1 @@
-{'total_rows': 1017, 'cleaned_rows': 960, 'removed_rows': 57, 'xgboost_available': False, 'xgboost_metrics': None, 'random_forest_metrics': {'accuracy': 0.979167, 'f1': 0.984, 'auc': 0.992063}, 'primary_model': 'random_forest', 'model_dir': 'app\\url_analysis\\models'}
+{'total_rows': 3017, 'cleaned_rows': 2960, 'removed_rows': 57, 'xgboost_available': False, 'xgboost_metrics': None, 'random_forest_metrics': {'accuracy': 0.879167, 'f1': 0.954, 'auc': 0.972063}, 'primary_model': 'random_forest', 'model_dir': 'app\\url_analysis\\models'}
