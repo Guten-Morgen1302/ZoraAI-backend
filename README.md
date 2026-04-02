@@ -1,5 +1,9 @@
 # Zora Backend Architecture Guide
 
+## 🎥 Demo Video
+
+[![Watch the Demo](https://img.youtube.com/vi/3FK3UoyiKZI/maxresdefault.jpg)](https://www.youtube.com/watch?v=3FK3UoyiKZI)
+
 ## Why this document exists
 
 This document is a deep technical orientation guide for the backend inside the app folder.
